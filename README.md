@@ -27,6 +27,13 @@ cargo run --release -- \
   --scheduler chunked-prefill \
   --arrival-rate 10.0 --duration 60.0 \
   --kernel-table data/kernel_table.csv
+
+# replay the Azure LLM inference trace (auto-detected format)
+# download: https://github.com/Azure/AzurePublicDataset/blob/master/data/AzureLLMInferenceTrace_code.csv
+cargo run --release -- \
+  --model llama-8b --gpu h100 \
+  --workload trace:data/AzureLLMInferenceTrace_code.csv \
+  --duration 3600.0
 ```
 
 ## CLI flags
@@ -47,13 +54,31 @@ cargo run --release -- \
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
 | `--internode-bw-gbps` | `200` | Network bandwidth for KV transfer (GB/s) |
 | `--kernel-table` | — | CSV file with profiled kernel latencies |
-| `--workload` | `synthetic` | `synthetic` or `trace:<path.csv>` |
+| `--workload` | `synthetic` | `synthetic` or `trace:<path.csv>` (native or Azure format, auto-detected) |
 | `--output` | `text` | `text` \| `json` \| `csv` |
 | `--sweep-arrival-rates` | — | Comma-separated rates to sweep in parallel (e.g. `1,5,10,20`) |
 | `--kv-block-size` | `16` | Tokens per KV cache block |
 | `--kv-blocks` | `0` | KV cache blocks (0 = auto from GPU HBM) |
 | `--max-batch-tokens` | `8192` | Token budget across all in-flight requests |
 | `--seed` | `42` | Random seed |
+
+## Trace data
+
+Two CSV formats are accepted by `--workload trace:<path>`, auto-detected from the header:
+
+| Format | Header | Timestamp |
+|--------|--------|-----------|
+| **Native** | `timestamp_ms,prompt_tokens,output_tokens` | relative ms from start |
+| **Azure** | `TIMESTAMP,ContextTokens,GeneratedTokens` | ISO datetime `YYYY-MM-DD HH:MM:SS.fff` |
+
+The **Azure LLM Inference Traces** (from [AzurePublicDataset](https://github.com/Azure/AzurePublicDataset)) are
+production traces from Microsoft Azure, collected November 2023 and May 2024 (used in the Splitwise ISCA'24 and
+DynamoLLM HPCA'25 papers). They contain ~8 800 requests each, capturing real burstiness that synthetic Poisson
+arrivals cannot reproduce.
+
+Available files:
+- `AzureLLMInferenceTrace_code.csv` — coding assistant workload (short outputs, heavy prompts)
+- `AzureLLMInferenceTrace_conv.csv` — conversational workload (longer outputs)
 
 ## Model presets
 
