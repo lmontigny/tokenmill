@@ -29,7 +29,7 @@ struct Args {
     #[arg(long, default_value = "h100")]
     gpu: String,
 
-    /// Model preset: llama-70b | llama-8b | mixtral-8x7b
+    /// Model preset: llama-70b | llama-8b | mixtral-8x7b | llama4-maverick | deepseek-v3
     #[arg(long, default_value = "llama-70b")]
     model: String,
 
@@ -110,7 +110,7 @@ struct Args {
     seed: u64,
 }
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── helpers ───────────────────────────────────────────────────────────────────
 
 fn load_kernel_table(path: &str) -> Option<KernelTable> {
     match KernelTable::from_csv(Path::new(path)) {
@@ -119,16 +119,165 @@ fn load_kernel_table(path: &str) -> Option<KernelTable> {
     }
 }
 
-fn auto_kv_blocks(gpu_spec: &GpuSpec, model: &LlmConfig, kv_block_size: u32) -> u32 {
-    let bytes_per_block = (model.kv_bytes(1) * kv_block_size as u64).max(1);
+/// Compute total logical KV cache blocks for the cluster.
+///
+/// With TP/PP, each GPU holds 1/(tp×pp) of the model weights and 1/(tp×pp) of
+/// the KV per token (KV heads sharded by TP, KV layers sharded by PP).
+/// Total logical blocks = (tp×pp × available_per_gpu) / bytes_per_block.
+fn auto_kv_blocks(gpu_spec: &GpuSpec, model: &LlmConfig, kv_block_size: u32, tp: u32, pp: u32) -> u32 {
+    let n_gpus = (tp * pp).max(1) as u64;
+    let weight_per_gpu = model.weight_bytes / n_gpus;
     let hbm = gpu_spec.hbm_capacity as f64;
-    let available = if model.weight_bytes < gpu_spec.hbm_capacity {
-        (hbm - model.weight_bytes as f64) * 0.80
+    let available_per_gpu = if weight_per_gpu < gpu_spec.hbm_capacity {
+        (hbm - weight_per_gpu as f64) * 0.80
     } else {
         hbm * 0.20
     };
-    ((available / bytes_per_block as f64) as u32).max(64)
+    let bytes_per_block = (model.kv_bytes(1) * kv_block_size as u64).max(1) as f64;
+    let total_blocks = n_gpus as f64 * available_per_gpu / bytes_per_block;
+    (total_blocks as u32).max(64)
 }
+
+fn fmt_bytes(bytes: u64) -> String {
+    let gb = bytes as f64 / 1e9;
+    if gb >= 1.0 { format!("{:.1} GB", gb) } else { format!("{:.0} MB", bytes as f64 / 1e6) }
+}
+
+fn fmt_params(bytes: u64, dtype_bytes: u32) -> String {
+    let params = bytes as f64 / dtype_bytes as f64;
+    if params >= 1e12 { format!("{:.1} T", params / 1e12) }
+    else if params >= 1e9 { format!("{:.0} B", params / 1e9) }
+    else { format!("{:.0} M", params / 1e6) }
+}
+
+fn dtype_label(bytes: u32) -> &'static str {
+    match bytes { 1 => "fp8", 2 => "bf16/fp16", 4 => "fp32", _ => "?" }
+}
+
+/// Print a model/cluster info card before running the simulation.
+fn print_model_card(args: &Args) {
+    let gpu = GpuSpec::preset(&args.gpu)
+        .unwrap_or_else(|| panic!("Unknown GPU '{}'", args.gpu));
+    let model = LlmConfig::preset(&args.model)
+        .unwrap_or_else(|| panic!("Unknown model '{}'", args.model));
+
+    let n_gpus = (args.tp * args.pp).max(1) as u64;
+    let weight_per_gpu = model.weight_bytes / n_gpus;
+    let fits = weight_per_gpu < gpu.hbm_capacity;
+
+    let kv_total_blocks = if args.kv_blocks > 0 {
+        args.kv_blocks
+    } else {
+        auto_kv_blocks(&gpu, &model, args.kv_block_size, args.tp, args.pp)
+    };
+    let kv_total_tokens = kv_total_blocks as u64 * args.kv_block_size as u64;
+    let kv_total_bytes = kv_total_tokens * model.kv_bytes(1);
+
+    let sep = "─".repeat(60);
+    println!("Model {}", sep);
+
+    // Parameters
+    let total_params = fmt_params(model.weight_bytes, model.dtype_bytes);
+    if model.is_moe() {
+        let active_params = fmt_params(model.weight_bytes_active(), model.dtype_bytes);
+        let active_pct = model.active_param_fraction() * 100.0;
+        println!("  Type           MoE (sparse activation)");
+        println!("  Parameters     {} params ({})  |  {} active/token ({:.1}%)",
+            total_params, fmt_bytes(model.weight_bytes), active_params, active_pct);
+    } else {
+        println!("  Type           dense");
+        println!("  Parameters     {} params ({})",
+            total_params, fmt_bytes(model.weight_bytes));
+    }
+
+    println!("  Dtype          {}  ({} byte/param)", dtype_label(model.dtype_bytes), model.dtype_bytes);
+    println!("  Architecture   {} layers  |  d_model={}  |  {} kv-heads × {} head-dim",
+        model.n_layers, model.d_model, model.n_kv_heads, model.head_dim);
+
+    if model.is_moe() {
+        let layer_str = if model.n_moe_layers < model.n_layers {
+            format!("{} MoE + {} dense", model.n_moe_layers, model.n_layers - model.n_moe_layers)
+        } else {
+            format!("all {} MoE", model.n_moe_layers)
+        };
+        let shared_str = if model.n_shared_experts > 0 {
+            format!(" + {} shared (always active)", model.n_shared_experts)
+        } else {
+            String::new()
+        };
+        println!("  MoE layers     {}", layer_str);
+        println!("  Experts        {} routable{}  |  top-{} per token",
+            model.n_experts, shared_str, model.n_active_experts);
+    }
+
+    // KV cache
+    let kv_per_token_kb = model.kv_bytes(1) as f64 / 1024.0;
+    if model.kv_lora_rank > 0 {
+        let std_kv_kb = 2.0 * model.n_layers as f64 * model.n_kv_heads as f64
+            * model.head_dim as f64 * model.dtype_bytes as f64 / 1024.0;
+        let compression = std_kv_kb / kv_per_token_kb;
+        println!("  KV cache (MLA) {} L × rank-{}  =  {:.1} KB/token  ({:.0}× smaller than MHA {:.0} KB)",
+            model.n_layers, model.kv_lora_rank, kv_per_token_kb, compression, std_kv_kb);
+    } else {
+        println!("  KV cache       {} L × {} H × {}  =  {:.1} KB/token",
+            model.n_layers, model.n_kv_heads, model.head_dim, kv_per_token_kb);
+    }
+
+    // Cluster section
+    let cluster_desc = build_cluster_desc(args, &gpu);
+    println!("Cluster {}", sep);
+    println!("  {}", cluster_desc);
+    println!("  HBM per GPU    {}  ({:.0} TFLOPS peak)", fmt_bytes(gpu.hbm_capacity), gpu.flops_bf16 / 1e12);
+
+    let weight_fit = if fits {
+        format!("✓ fits  ({}/GPU < {} HBM)",
+            fmt_bytes(weight_per_gpu), fmt_bytes(gpu.hbm_capacity))
+    } else {
+        let min_tp = ((model.weight_bytes as f64 / (gpu.hbm_capacity as f64 * 0.85)).ceil() as u32).max(2);
+        format!("✗ EXCEEDS HBM  ({}/GPU > {} HBM)  — use --tp {} or higher",
+            fmt_bytes(weight_per_gpu), fmt_bytes(gpu.hbm_capacity), min_tp)
+    };
+    println!("  Weights        {}  total  →  {}", fmt_bytes(model.weight_bytes), weight_fit);
+
+    let cluster_flops_pflops = gpu.flops_bf16 * n_gpus as f64 / 1e15;
+    println!("  Peak FLOPS     {:.1} TFLOPS × {} GPUs  =  {:.1} PFLOPS",
+        gpu.flops_bf16 / 1e12, n_gpus, cluster_flops_pflops);
+
+    println!("  KV budget      {} blocks × {} tok  =  {:>8} tokens  ({})",
+        kv_total_blocks, args.kv_block_size,
+        fmt_with_commas(kv_total_tokens), fmt_bytes(kv_total_bytes));
+
+    if args.ep > 1 {
+        println!("  Expert par.    EP={}  ({} experts/GPU)",
+            args.ep,
+            (model.n_experts / args.ep).max(1));
+    }
+
+    println!("{}", sep);
+    println!();
+}
+
+fn build_cluster_desc(args: &Args, gpu: &GpuSpec) -> String {
+    let n_gpus = args.tp * args.pp;
+    let mut parts = vec![format!("{}× {}", n_gpus, gpu.name)];
+    if args.tp > 1 { parts.push(format!("TP={}", args.tp)); }
+    if args.pp > 1 { parts.push(format!("PP={}", args.pp)); }
+    if args.ep > 1 { parts.push(format!("EP={}", args.ep)); }
+    if args.disaggregate { parts.push("disaggregated P/D".to_string()); }
+    parts.join("  |  ")
+}
+
+fn fmt_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 { out.push(','); }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
+// ── run_once ──────────────────────────────────────────────────────────────────
 
 fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSummary {
     let gpu_spec = GpuSpec::preset(&args.gpu)
@@ -139,7 +288,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     let kv_total_blocks = if args.kv_blocks > 0 {
         args.kv_blocks
     } else {
-        auto_kv_blocks(&gpu_spec, &model, args.kv_block_size)
+        auto_kv_blocks(&gpu_spec, &model, args.kv_block_size, args.tp, args.pp)
     };
 
     let scheduler = match args.scheduler.as_str() {
@@ -167,15 +316,12 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     };
 
     let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
-
     let latency_mode = if kt.is_some() { "kernel-table+roofline" } else { "roofline" };
 
     let mut sim = if args.workload.starts_with("trace:") {
         let path = &args.workload["trace:".len()..];
         let mut trace = TraceReplay::from_csv(Path::new(path))
             .unwrap_or_else(|e| panic!("Cannot load trace '{}': {}", path, e));
-        // Duration = last timestamp in trace + some buffer
-        let duration = args.duration;
         Simulator::new(prefill_gpu, decode_gpu, model.clone(), cluster, scheduler, &mut trace, kv)
     } else {
         let mut w = SyntheticWorkload::new(arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed);
@@ -199,24 +345,19 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     )
 }
 
-// ── main ─────────────────────────────────────────────────────────────────────
+// ── main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
     let args = Args::parse();
 
-    // Load kernel table once (shared across sweep runs).
     let kt: Option<KernelTable> = args.kernel_table.as_deref().and_then(load_kernel_table);
 
-    // Announce config (single-run header; sweep prints its own header).
-    if args.sweep_arrival_rates.is_none() {
-        let latency_mode = if kt.is_some() { "kernel-table+roofline" } else { "roofline" };
-        println!(
-            "Running: {} on {} | scheduler={} | latency={} | workload={}",
-            args.model, args.gpu, args.scheduler, latency_mode, args.workload
-        );
+    // Print model card unless machine-readable output is requested.
+    if args.output == "text" {
+        print_model_card(&args);
     }
 
-    // ── sweep mode ───────────────────────────────────────────────────────────
+    // ── sweep mode ────────────────────────────────────────────────────────────
     if let Some(rates_str) = &args.sweep_arrival_rates {
         let rates: Vec<f64> = rates_str.split(',')
             .filter_map(|s| s.trim().parse().ok())
@@ -227,12 +368,10 @@ fn main() {
             std::process::exit(1);
         }
 
-        // Run all rates in parallel with rayon.
         let summaries: Vec<RunSummary> = rates.par_iter()
             .map(|&rate| run_once(&args, rate, kt.as_ref()))
             .collect();
 
-        // Output
         match args.output.as_str() {
             "json" => println!("{}", serde_json::to_string_pretty(&summaries).unwrap()),
             "csv"  => {
@@ -250,7 +389,7 @@ fn main() {
         return;
     }
 
-    // ── single run ───────────────────────────────────────────────────────────
+    // ── single run ────────────────────────────────────────────────────────────
     let summary = run_once(&args, args.arrival_rate, kt.as_ref());
 
     match args.output.as_str() {
