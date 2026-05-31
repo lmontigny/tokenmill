@@ -10,6 +10,7 @@ use std::path::Path;
 use clap::Parser;
 
 use engine::sim::{Simulator, SchedulerKind};
+use hardware::cluster::ClusterConfig;
 use hardware::gpu::GpuState;
 use hardware::kernel_table::KernelTable;
 use model::kv_cache::KvCacheManager;
@@ -65,6 +66,14 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     kv_blocks: u32,
 
+    /// Tensor parallelism degree (splits each layer across N GPUs)
+    #[arg(long, default_value_t = 1)]
+    tp: u32,
+
+    /// Pipeline parallelism degree (splits layer stack into N sequential stages)
+    #[arg(long, default_value_t = 1)]
+    pp: u32,
+
     /// Kernel time table CSV (enables profiled latencies; falls back to roofline on miss)
     #[arg(long)]
     kernel_table: Option<String>,
@@ -107,15 +116,28 @@ fn main() {
         other => panic!("Unknown scheduler '{}'. Use: continuous-batch, chunked-prefill", other),
     };
 
-    let latency_mode = if args.kernel_table.is_some() { "kernel-table+roofline fallback" } else { "roofline" };
+    let latency_mode = if args.kernel_table.is_some() { "kernel-table+roofline" } else { "roofline" };
+    let parallelism = match (args.tp, args.pp) {
+        (1, 1) => "single-gpu".to_string(),
+        (tp, 1) => format!("TP={tp}"),
+        (1, pp) => format!("PP={pp}"),
+        (tp, pp) => format!("TP={tp} PP={pp}"),
+    };
     println!(
-        "Running: {} on {} | scheduler={} | latency={} | arrival={} req/s | duration={}s",
-        model.name, gpu_spec.name, scheduler_name, latency_mode, args.arrival_rate, args.duration
+        "Running: {} on {} | {} | scheduler={} | latency={} | arrival={} req/s | duration={}s",
+        model.name, gpu_spec.name, parallelism, scheduler_name, latency_mode, args.arrival_rate, args.duration
     );
     println!(
         "KV cache: {} blocks × {} tokens/block = {} total token slots",
         kv_total_blocks, args.kv_block_size, kv_total_blocks * args.kv_block_size
     );
+
+    let cluster = ClusterConfig {
+        tp: args.tp,
+        pp: args.pp,
+        nvlink_bw: gpu_spec.nvlink_bandwidth,
+        internode_bw: 200e9, // 200 GB/s InfiniBand HDR default
+    };
 
     let mut gpu = GpuState::new(0, gpu_spec);
     if let Some(path) = &args.kernel_table {
@@ -133,7 +155,7 @@ fn main() {
         args.arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed,
     );
 
-    let mut sim = Simulator::new(gpu, model, scheduler, workload, kv);
+    let mut sim = Simulator::new(gpu, model, cluster, scheduler, workload, kv);
     sim.run(args.duration);
     sim.metrics.print_report();
 }

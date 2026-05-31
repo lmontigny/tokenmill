@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 
+use crate::hardware::cluster::ClusterConfig;
 use crate::hardware::gpu::GpuState;
 use crate::metrics::collector::MetricsCollector;
 use crate::model::kv_cache::KvCacheManager;
@@ -22,6 +23,7 @@ pub struct Simulator {
     queue: SimQueue,
     gpu: GpuState,
     model: LlmConfig,
+    cluster: ClusterConfig,
     scheduler: SchedulerKind,
     pub metrics: MetricsCollector,
     kv: KvCacheManager,
@@ -41,6 +43,7 @@ impl Simulator {
     pub fn new(
         gpu: GpuState,
         model: LlmConfig,
+        cluster: ClusterConfig,
         scheduler: SchedulerKind,
         mut workload: SyntheticWorkload,
         kv: KvCacheManager,
@@ -56,6 +59,7 @@ impl Simulator {
             queue,
             gpu,
             model,
+            cluster,
             scheduler,
             metrics: MetricsCollector::new(),
             kv,
@@ -159,7 +163,7 @@ impl Simulator {
         *self.prefill_progress.entry(req_id).or_insert(0) += chunk_tokens;
         let start = self.gpu.busy_until.max(self.clock);
         let kt = self.gpu.kernel_table.as_ref();
-        let latency = self.gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt);
+        let latency = self.gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
         let done_time = start + latency;
         self.gpu.busy_until = done_time;
         vec![(done_time, EventPayload::PrefillDone { req_id, gpu_id })]
@@ -211,7 +215,7 @@ impl Simulator {
             total / batch_size.max(1)
         };
         let kt = self.gpu.kernel_table.as_ref();
-        let latency = self.gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt);
+        let latency = self.gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
 
         let start = self.gpu.busy_until.max(self.clock);
         let done_time = start + latency;
