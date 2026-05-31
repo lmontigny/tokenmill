@@ -81,6 +81,10 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     pp: u32,
 
+    /// Expert parallelism degree (MoE models only)
+    #[arg(long, default_value_t = 1)]
+    ep: u32,
+
     /// Disaggregate prefill and decode onto separate GPUs
     #[arg(long)]
     disaggregate: bool,
@@ -145,7 +149,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     };
 
     let cluster = ClusterConfig {
-        tp: args.tp, pp: args.pp,
+        tp: args.tp, pp: args.pp, ep: args.ep,
         nvlink_bw: gpu_spec.nvlink_bandwidth,
         internode_bw: args.internode_bw_gbps * 1e9,
         disaggregate: args.disaggregate,

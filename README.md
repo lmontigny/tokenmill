@@ -34,7 +34,7 @@ cargo run --release -- \
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--gpu` | `h100` | GPU preset: `h100` \| `a100` \| `a10g` |
-| `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `mixtral-8x7b` |
+| `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
 | `--arrival-rate` | `5.0` | Requests per second (Poisson) |
@@ -43,6 +43,7 @@ cargo run --release -- \
 | `--output-mean` | `128.0` | Mean output length (log-normal, tokens) |
 | `--tp` | `1` | Tensor parallelism degree |
 | `--pp` | `1` | Pipeline parallelism degree |
+| `--ep` | `1` | Expert parallelism degree (MoE models) |
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
 | `--internode-bw-gbps` | `200` | Network bandwidth for KV transfer (GB/s) |
 | `--kernel-table` | — | CSV file with profiled kernel latencies |
@@ -54,6 +55,19 @@ cargo run --release -- \
 | `--max-batch-tokens` | `8192` | Token budget across all in-flight requests |
 | `--seed` | `42` | Random seed |
 
+## Model presets
+
+| Preset | Type | Total params | Active/token | Notes |
+|--------|------|-------------|--------------|-------|
+| `llama-70b` | dense | 70 B (bf16) | 70 B | GQA, 80 layers |
+| `llama-8b` | dense | 8 B (bf16) | 8 B | GQA, 32 layers |
+| `mixtral-8x7b` | MoE | 46.7 B (bf16) | ~12.9 B | 8 experts top-2, all layers MoE |
+| `llama4-maverick` | MoE | 400 B (fp8) | 17 B | 128 experts top-1+1 shared, 36/48 MoE layers |
+| `deepseek-v3` | MoE | 671 B (fp8) | 37 B | 256 experts top-8+1 shared, MLA KV compression |
+
+DeepSeek V3 uses **Multi-head Latent Attention (MLA)** which compresses the KV cache to a 512-dimensional
+latent vector per layer — roughly 64× smaller than standard MHA — enabling long-context serving at scale.
+
 ## Latency model
 
 Without `--kernel-table`: **roofline** (compute-bound prefill, memory-BW-bound decode).
@@ -61,6 +75,31 @@ With `--kernel-table`: table lookup with linear interpolation on seq_len, roofli
 
 To improve accuracy, add rows to `data/kernel_table.csv` from your own profiling.
 CSV format: `gpu,model,op,batch_size,seq_len,latency_ms`
+
+## MoE accuracy model
+
+**Prefill** (compute-bound, active FLOPs only):
+```
+active_flops = base_flops × active_param_fraction
+active_param_fraction = active_weight_bytes / weight_bytes   (when set)
+                      ≈ 1/3 (attn) + 2/3 × (dense_layers + moe_layers × top_K/n_experts)
+```
+
+**Decode** (memory-BW bound, active weights):
+```
+latency = (weight_bytes_active + kv_bytes × batch) / (HBM_BW × mfu_decode)
+weight_bytes_active = active weight bytes for one forward pass (presets use published values)
+```
+
+**DeepSeek V3 KV cache** (MLA compression):
+```
+kv_bytes = n_layers × kv_lora_rank × seq_len × dtype_bytes   (vs 2 × n_layers × n_kv_heads × head_dim × seq_len)
+```
+
+**EP all-to-all** (2 per MoE layer: token dispatch + result gather):
+```
+latency = (ep-1)/ep × tokens_per_gpu × d_model × dtype_bytes / nvlink_bw
+```
 
 ## Architecture
 
@@ -83,3 +122,4 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 | 4 | ✅ | Multi-GPU: tensor parallelism + pipeline parallelism |
 | 5 | ✅ | Disaggregated prefill/decode with KV transfer latency |
 | 6 | ✅ | Trace replay, JSON/CSV output, parallel sweep with rayon |
+| 7 | ✅ | MoE: sparse activation, expert parallelism, MLA KV compression (Llama 4 Maverick, DeepSeek V3) |

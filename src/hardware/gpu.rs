@@ -17,11 +17,10 @@ pub struct GpuSpec {
 }
 
 impl GpuSpec {
-    /// Prefill latency in seconds, accounting for TP and PP.
+    /// Prefill latency in seconds, accounting for TP, PP, and EP (MoE expert parallelism).
     ///
-    /// TP splits compute across tp GPUs (each does 1/tp of FLOPs),
-    /// then pays n_layers × 2 all-reduces (after attention + after FFN).
-    /// PP splits the layer stack across pp stages executed serially.
+    /// For MoE models: active FLOPs are scaled by active_param_fraction, and each MoE layer
+    /// adds two EP all-to-alls (dispatch tokens to expert GPUs + gather results).
     pub fn prefill_latency(
         &self,
         batch: u32,
@@ -33,7 +32,6 @@ impl GpuSpec {
         let tp = cluster.tp.max(1);
         let pp = cluster.pp.max(1);
 
-        // Base latency for the full model (table or roofline)
         let base = if let Some(kt) = ktable {
             kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Prefill, batch, seq_len)
                 .unwrap_or_else(|| self.roofline_prefill(batch, seq_len, model))
@@ -41,26 +39,31 @@ impl GpuSpec {
             self.roofline_prefill(batch, seq_len, model)
         };
 
-        // TP: compute scales by 1/tp; each of n_layers has 2 all-reduces
-        // (one after attention projection, one after FFN projection).
-        // msg per all-reduce = batch * seq_len * d_model * dtype_bytes
         let compute = base / tp as f64;
         let ar_msg = batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let ar_cost = model.n_layers as f64 * 2.0 * cluster.all_reduce_latency(ar_msg);
 
-        // PP: stages are serial; total latency ≈ base / pp (each stage handles 1/pp of layers).
-        // Inter-stage transfer: activation = batch * seq_len * d_model * dtype_bytes.
         let pp_transfers = (pp - 1) as f64;
         let act_bytes = batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let pp_cost = pp_transfers * cluster.pp_transfer_latency(act_bytes, true);
 
-        (compute + ar_cost) / pp as f64 + pp_cost
+        // EP all-to-all: two per MoE layer (dispatch + combine), run in parallel with TP.
+        let ep_cost = if model.is_moe() && model.n_moe_layers > 0 {
+            let batch_tokens = batch as u64 * seq_len as u64;
+            model.n_moe_layers as f64
+                * 2.0
+                * cluster.ep_all_to_all_latency(batch_tokens, model.d_model, model.dtype_bytes)
+        } else {
+            0.0
+        };
+
+        (compute + ar_cost) / pp as f64 + pp_cost + ep_cost
     }
 
-    /// Batch decode latency in seconds for one token step across all decode requests.
+    /// Batch decode latency in seconds for one token step.
     ///
-    /// Memory-BW bound: load weights (1/tp per GPU) + read KV caches.
-    /// Then pay all-reduces and PP transfers same as prefill but for batch=1 token.
+    /// Memory-BW bound: load active weights (1/tp per GPU, sparse for MoE) + read KV caches.
+    /// MoE adds two EP all-to-alls per MoE layer.
     pub fn decode_latency(
         &self,
         batch: u32,
@@ -79,28 +82,38 @@ impl GpuSpec {
             self.roofline_decode(batch, avg_kv_len, model)
         };
 
-        // TP: weight load and KV load divided by tp; all-reduce on each layer output.
-        // For decode, seq_len=1 per new token.
         let compute = base / tp as f64;
-        let ar_msg = batch as u64 * 1_u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let ar_msg = batch as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let ar_cost = model.n_layers as f64 * 2.0 * cluster.all_reduce_latency(ar_msg);
 
-        // PP: same stage-serial + transfer model as prefill, but for 1 output token.
         let pp_transfers = (pp - 1) as f64;
-        let act_bytes = batch as u64 * 1_u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let act_bytes = batch as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let pp_cost = pp_transfers * cluster.pp_transfer_latency(act_bytes, true);
 
-        (compute + ar_cost) / pp as f64 + pp_cost
+        // EP all-to-all: one new token per request in the batch.
+        let ep_cost = if model.is_moe() && model.n_moe_layers > 0 {
+            model.n_moe_layers as f64
+                * 2.0
+                * cluster.ep_all_to_all_latency(batch as u64, model.d_model, model.dtype_bytes)
+        } else {
+            0.0
+        };
+
+        (compute + ar_cost) / pp as f64 + pp_cost + ep_cost
     }
 
     fn roofline_prefill(&self, batch: u32, seq_len: u32, model: &LlmConfig) -> f64 {
-        let flops = 2.0 * batch as f64 * seq_len as f64 * model.d_model as f64 * model.n_layers as f64 * 12.0;
-        flops / (self.flops_bf16 * self.mfu_prefill)
+        let base_flops =
+            2.0 * batch as f64 * seq_len as f64 * model.d_model as f64 * model.n_layers as f64 * 12.0;
+        // Scale active FLOPs for MoE (only top-K experts run per token).
+        let active_flops = base_flops * model.active_param_fraction();
+        active_flops / (self.flops_bf16 * self.mfu_prefill)
     }
 
     fn roofline_decode(&self, batch: u32, avg_kv_len: u32, model: &LlmConfig) -> f64 {
         let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
-        (model.weight_bytes + kv_bytes) as f64 / (self.hbm_bandwidth * self.mfu_decode)
+        // Use active weight bytes for MoE (only loaded experts contribute to BW).
+        (model.weight_bytes_active() + kv_bytes) as f64 / (self.hbm_bandwidth * self.mfu_decode)
     }
 
     pub fn preset(name: &str) -> Option<Self> {
