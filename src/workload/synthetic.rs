@@ -5,6 +5,7 @@ use rand_distr::{Distribution, Exp, LogNormal};
 use crate::engine::event::SimTime;
 
 use super::request::InferenceRequest;
+use super::traits::WorkloadSource;
 
 pub struct SyntheticWorkload {
     arrival_rate: f64,
@@ -35,6 +36,15 @@ impl SyntheticWorkload {
         }
     }
 
+}
+
+impl WorkloadSource for SyntheticWorkload {
+    fn next_arrival(&mut self) -> Option<(SimTime, InferenceRequest)> {
+        SyntheticWorkload::next_arrival(self)
+    }
+}
+
+impl SyntheticWorkload {
     pub fn next_arrival(&mut self) -> Option<(SimTime, InferenceRequest)> {
         let gap = Exp::new(self.arrival_rate).unwrap().sample(&mut self.rng);
         self.clock += gap;

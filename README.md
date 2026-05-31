@@ -46,6 +46,9 @@ cargo run --release -- \
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
 | `--internode-bw-gbps` | `200` | Network bandwidth for KV transfer (GB/s) |
 | `--kernel-table` | — | CSV file with profiled kernel latencies |
+| `--workload` | `synthetic` | `synthetic` or `trace:<path.csv>` |
+| `--output` | `text` | `text` \| `json` \| `csv` |
+| `--sweep-arrival-rates` | — | Comma-separated rates to sweep in parallel (e.g. `1,5,10,20`) |
 | `--kv-block-size` | `16` | Tokens per KV cache block |
 | `--kv-blocks` | `0` | KV cache blocks (0 = auto from GPU HBM) |
 | `--max-batch-tokens` | `8192` | Token budget across all in-flight requests |
@@ -79,4 +82,4 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 | 3 | ✅ | Kernel time table (CSV), linear interpolation, roofline fallback |
 | 4 | ✅ | Multi-GPU: tensor parallelism + pipeline parallelism |
 | 5 | ✅ | Disaggregated prefill/decode with KV transfer latency |
-| 6 | 🔜 | Trace replay, JSON/CSV output |
+| 6 | ✅ | Trace replay, JSON/CSV output, parallel sweep with rayon |

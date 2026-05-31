@@ -8,7 +8,7 @@ use crate::model::llm_config::LlmConfig;
 use crate::scheduler::chunked_prefill::ChunkedPrefillScheduler;
 use crate::scheduler::continuous_batch::ContinuousBatchScheduler;
 use crate::workload::request::{InferenceRequest, RequestPhase, RequestState};
-use crate::workload::synthetic::SyntheticWorkload;
+use crate::workload::traits::WorkloadSource;
 
 use super::event::{EventPayload, SimTime};
 use super::queue::SimQueue;
@@ -49,7 +49,7 @@ impl Simulator {
         model: LlmConfig,
         cluster: ClusterConfig,
         scheduler: SchedulerKind,
-        mut workload: SyntheticWorkload,
+        workload: &mut dyn WorkloadSource,
         kv: KvCacheManager,
     ) -> Self {
         let mut queue = SimQueue::new();

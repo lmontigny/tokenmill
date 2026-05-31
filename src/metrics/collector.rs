@@ -1,5 +1,7 @@
 use hdrhistogram::Histogram;
 
+use super::report::RunSummary;
+
 pub struct MetricsCollector {
     ttft: Histogram<u64>,           // microseconds — arrival → first output token
     prefill_lat: Histogram<u64>,    // microseconds — arrival → prefill done
@@ -65,6 +67,33 @@ impl MetricsCollector {
 
     fn pct(h: &Histogram<u64>, q: f64) -> f64 {
         h.value_at_quantile(q) as f64 / 1000.0 // µs → ms
+    }
+
+    pub fn to_summary(&self, model: &str, gpu: &str, scheduler: &str, tp: u32, pp: u32,
+                      disaggregate: bool, arrival_rate: f64, latency_mode: &str) -> RunSummary {
+        let throughput = self.completions as f64 / self.sim_duration.max(1e-9);
+        let tok_throughput = self.tokens_generated as f64 / self.sim_duration.max(1e-9);
+        RunSummary {
+            model: model.into(), gpu: gpu.into(), scheduler: scheduler.into(),
+            tp, pp, disaggregate, arrival_rate, duration_s: self.sim_duration,
+            latency_mode: latency_mode.into(),
+            completions: self.completions,
+            throughput_rps: throughput,
+            token_throughput: tok_throughput,
+            kv_util_mean_pct: self.kv_util_mean() * 100.0,
+            ttft_p50_ms:        Self::pct(&self.ttft, 0.50),
+            ttft_p95_ms:        Self::pct(&self.ttft, 0.95),
+            ttft_p99_ms:        Self::pct(&self.ttft, 0.99),
+            prefill_p50_ms:     Self::pct(&self.prefill_lat, 0.50),
+            prefill_p95_ms:     Self::pct(&self.prefill_lat, 0.95),
+            prefill_p99_ms:     Self::pct(&self.prefill_lat, 0.99),
+            kv_transfer_p50_ms: Self::pct(&self.kv_transfer, 0.50),
+            kv_transfer_p95_ms: Self::pct(&self.kv_transfer, 0.95),
+            kv_transfer_p99_ms: Self::pct(&self.kv_transfer, 0.99),
+            tpot_p50_ms:        Self::pct(&self.tpot, 0.50),
+            tpot_p95_ms:        Self::pct(&self.tpot, 0.95),
+            tpot_p99_ms:        Self::pct(&self.tpot, 0.99),
+        }
     }
 
     pub fn print_report(&self) {
