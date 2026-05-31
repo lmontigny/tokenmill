@@ -5,10 +5,13 @@ mod model;
 mod scheduler;
 mod workload;
 
+use std::path::Path;
+
 use clap::Parser;
 
 use engine::sim::{Simulator, SchedulerKind};
 use hardware::gpu::GpuState;
+use hardware::kernel_table::KernelTable;
 use model::kv_cache::KvCacheManager;
 use model::llm_config::LlmConfig;
 use scheduler::chunked_prefill::ChunkedPrefillScheduler;
@@ -62,6 +65,10 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     kv_blocks: u32,
 
+    /// Kernel time table CSV (enables profiled latencies; falls back to roofline on miss)
+    #[arg(long)]
+    kernel_table: Option<String>,
+
     /// Random seed
     #[arg(long, default_value_t = 42)]
     seed: u64,
@@ -77,8 +84,8 @@ fn main() {
         .unwrap_or_else(|| panic!("Unknown model '{}'. Use: llama-70b, llama-8b, mixtral-8x7b", args.model));
 
     // Auto-size KV cache: (HBM - weights) × 80% / bytes_per_block.
-    // If the model is larger than a single GPU's HBM (e.g. llama-70b on H100 without TP),
-    // fall back to 20% of HBM — multi-GPU TP is modelled in Phase 4.
+    // If model is larger than a single GPU's HBM (e.g. llama-70b without TP),
+    // fall back to 20% of HBM — TP is modelled in Phase 4.
     let kv_total_blocks = if args.kv_blocks > 0 {
         args.kv_blocks
     } else {
@@ -88,40 +95,42 @@ fn main() {
         let available = if model.weight_bytes < gpu_spec.hbm_capacity {
             (hbm - model.weight_bytes as f64) * 0.80
         } else {
-            hbm * 0.20 // model spans multiple GPUs; reserve a slice for KV accounting
+            hbm * 0.20
         };
         ((available / bytes_per_block as f64) as u32).max(64)
     };
 
     let scheduler_name = args.scheduler.as_str();
     let scheduler = match scheduler_name {
-        "continuous-batch" => SchedulerKind::Continuous(
-            ContinuousBatchScheduler::new(args.max_batch_tokens)
-        ),
-        "chunked-prefill" => SchedulerKind::Chunked(
-            ChunkedPrefillScheduler::new(args.chunk_size, args.max_batch_tokens)
-        ),
+        "continuous-batch" => SchedulerKind::Continuous(ContinuousBatchScheduler::new(args.max_batch_tokens)),
+        "chunked-prefill"  => SchedulerKind::Chunked(ChunkedPrefillScheduler::new(args.chunk_size, args.max_batch_tokens)),
         other => panic!("Unknown scheduler '{}'. Use: continuous-batch, chunked-prefill", other),
     };
 
+    let latency_mode = if args.kernel_table.is_some() { "kernel-table+roofline fallback" } else { "roofline" };
     println!(
-        "Running: {} on {} | scheduler={} | arrival={} req/s | duration={}s",
-        model.name, gpu_spec.name, scheduler_name, args.arrival_rate, args.duration
+        "Running: {} on {} | scheduler={} | latency={} | arrival={} req/s | duration={}s",
+        model.name, gpu_spec.name, scheduler_name, latency_mode, args.arrival_rate, args.duration
     );
     println!(
         "KV cache: {} blocks × {} tokens/block = {} total token slots",
-        kv_total_blocks, args.kv_block_size,
-        kv_total_blocks * args.kv_block_size
+        kv_total_blocks, args.kv_block_size, kv_total_blocks * args.kv_block_size
     );
 
-    let gpu = GpuState::new(0, gpu_spec);
+    let mut gpu = GpuState::new(0, gpu_spec);
+    if let Some(path) = &args.kernel_table {
+        match KernelTable::from_csv(Path::new(path)) {
+            Ok(kt) => {
+                println!("Kernel table loaded: {}", path);
+                gpu = gpu.with_kernel_table(kt);
+            }
+            Err(e) => eprintln!("Warning: could not load kernel table '{}': {}", path, e),
+        }
+    }
+
     let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
     let workload = SyntheticWorkload::new(
-        args.arrival_rate,
-        args.prompt_mean,
-        args.output_mean,
-        args.duration,
-        args.seed,
+        args.arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed,
     );
 
     let mut sim = Simulator::new(gpu, model, scheduler, workload, kv);

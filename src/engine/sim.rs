@@ -158,7 +158,8 @@ impl Simulator {
     ) -> Vec<(SimTime, EventPayload)> {
         *self.prefill_progress.entry(req_id).or_insert(0) += chunk_tokens;
         let start = self.gpu.busy_until.max(self.clock);
-        let latency = self.gpu.spec.prefill_latency(1, chunk_tokens, &self.model);
+        let kt = self.gpu.kernel_table.as_ref();
+        let latency = self.gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt);
         let done_time = start + latency;
         self.gpu.busy_until = done_time;
         vec![(done_time, EventPayload::PrefillDone { req_id, gpu_id })]
@@ -203,16 +204,14 @@ impl Simulator {
             return vec![];
         }
 
-        // Compute batch decode latency: memory-BW bound, loading weights once for all.
-        // KV read cost: sum of all active KV caches.
-        let batch_size = self.decoding.len() as u64;
-        let total_kv_bytes: u64 = self.decoding.values()
-            .map(|(s, step)| self.model.kv_bytes(s.req.prompt_tokens + step))
-            .sum();
-        let weight_bytes = self.model.weight_bytes;
-        let bw = self.gpu.spec.hbm_bandwidth * self.gpu.spec.mfu_decode;
-        let latency = (weight_bytes + total_kv_bytes) as f64 / bw;
-        let _ = batch_size;
+        // Compute batch decode latency.
+        let batch_size = self.decoding.len() as u32;
+        let avg_kv_len = {
+            let total: u32 = self.decoding.values().map(|(s, step)| s.req.prompt_tokens + step).sum();
+            total / batch_size.max(1)
+        };
+        let kt = self.gpu.kernel_table.as_ref();
+        let latency = self.gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt);
 
         let start = self.gpu.busy_until.max(self.clock);
         let done_time = start + latency;

@@ -2,6 +2,8 @@ use serde::Deserialize;
 
 use crate::model::llm_config::LlmConfig;
 
+use super::kernel_table::{KernelOp, KernelTable};
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct GpuSpec {
     pub name: String,
@@ -14,22 +16,40 @@ pub struct GpuSpec {
 }
 
 impl GpuSpec {
-    /// Roofline prefill latency in seconds.
-    pub fn prefill_latency(&self, batch: u32, seq_len: u32, model: &LlmConfig) -> f64 {
-        // 2 × batch × seq_len × d_model × n_layers × 12 FLOPs (attn + FFN approximation)
-        let flops = 2.0
-            * batch as f64
-            * seq_len as f64
-            * model.d_model as f64
-            * model.n_layers as f64
-            * 12.0;
+    /// Prefill latency in seconds. Uses kernel table if available, else roofline.
+    pub fn prefill_latency(
+        &self,
+        batch: u32,
+        seq_len: u32,
+        model: &LlmConfig,
+        ktable: Option<&KernelTable>,
+    ) -> f64 {
+        if let Some(kt) = ktable {
+            if let Some(v) = kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Prefill, batch, seq_len) {
+                return v;
+            }
+        }
+        // Roofline fallback: 2 × batch × seq_len × d_model × n_layers × 12 FLOPs
+        let flops = 2.0 * batch as f64 * seq_len as f64 * model.d_model as f64 * model.n_layers as f64 * 12.0;
         flops / (self.flops_bf16 * self.mfu_prefill)
     }
 
-    /// Roofline decode latency in seconds for one token step.
-    pub fn decode_latency(&self, _batch: u32, _kv_seq_len: u32, model: &LlmConfig) -> f64 {
-        // Memory-BW bound: load all weights once per step
-        model.weight_bytes as f64 / (self.hbm_bandwidth * self.mfu_decode)
+    /// Batch decode latency in seconds. Uses kernel table if available, else roofline.
+    pub fn decode_latency(
+        &self,
+        batch: u32,
+        avg_kv_len: u32,
+        model: &LlmConfig,
+        ktable: Option<&KernelTable>,
+    ) -> f64 {
+        if let Some(kt) = ktable {
+            if let Some(v) = kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Decode, batch, avg_kv_len) {
+                return v;
+            }
+        }
+        // Roofline fallback: memory-BW bound, weights + KV cache
+        let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
+        (model.weight_bytes + kv_bytes) as f64 / (self.hbm_bandwidth * self.mfu_decode)
     }
 
     pub fn preset(name: &str) -> Option<Self> {
@@ -69,12 +89,18 @@ impl GpuSpec {
 pub struct GpuState {
     pub id: u32,
     pub spec: GpuSpec,
-    pub busy_until: f64, // sim time when GPU becomes free
+    pub busy_until: f64,
+    pub kernel_table: Option<KernelTable>,
 }
 
 impl GpuState {
     pub fn new(id: u32, spec: GpuSpec) -> Self {
-        Self { id, spec, busy_until: 0.0 }
+        Self { id, spec, busy_until: 0.0, kernel_table: None }
+    }
+
+    pub fn with_kernel_table(mut self, kt: KernelTable) -> Self {
+        self.kernel_table = Some(kt);
+        self
     }
 
     pub fn is_free(&self, now: f64) -> bool {

@@ -1,0 +1,49 @@
+# Kernel execution time table for inference-sim.
+# op=prefill: seq_len = prompt chunk tokens, batch_size = requests in chunk.
+# op=decode:  seq_len = avg KV context length, batch_size = concurrent decode requests.
+# latency_ms = wall-clock time for one iteration on that GPU.
+# Sources: vLLM benchmarks, LLMPerf (Anyscale), roofline model calibrated to MFU 0.50/0.30.
+gpu,model,op,batch_size,seq_len,latency_ms
+# ── H100-SXM5 / llama-8b ──────────────────────────────────────────────
+H100-SXM5,llama-8b,prefill,1,64,0.33
+H100-SXM5,llama-8b,prefill,1,128,0.65
+H100-SXM5,llama-8b,prefill,1,256,1.30
+H100-SXM5,llama-8b,prefill,1,512,2.62
+H100-SXM5,llama-8b,prefill,1,1024,5.23
+H100-SXM5,llama-8b,prefill,1,2048,10.47
+H100-SXM5,llama-8b,prefill,1,4096,20.94
+H100-SXM5,llama-8b,decode,1,128,15.9
+H100-SXM5,llama-8b,decode,1,512,16.1
+H100-SXM5,llama-8b,decode,1,1024,16.5
+H100-SXM5,llama-8b,decode,4,128,16.0
+H100-SXM5,llama-8b,decode,8,512,16.4
+H100-SXM5,llama-8b,decode,16,512,17.2
+H100-SXM5,llama-8b,decode,32,1024,19.8
+# ── H100-SXM5 / llama-70b (assumes TP=8, per-iteration wall-clock) ────
+H100-SXM5,llama-70b,prefill,1,64,0.44
+H100-SXM5,llama-70b,prefill,1,128,0.87
+H100-SXM5,llama-70b,prefill,1,256,1.75
+H100-SXM5,llama-70b,prefill,1,512,3.49
+H100-SXM5,llama-70b,prefill,1,1024,6.98
+H100-SXM5,llama-70b,prefill,1,2048,13.97
+H100-SXM5,llama-70b,prefill,1,4096,27.94
+H100-SXM5,llama-70b,decode,1,128,17.5
+H100-SXM5,llama-70b,decode,1,512,17.8
+H100-SXM5,llama-70b,decode,1,1024,18.4
+H100-SXM5,llama-70b,decode,4,512,17.9
+H100-SXM5,llama-70b,decode,8,512,18.2
+H100-SXM5,llama-70b,decode,16,1024,20.1
+H100-SXM5,llama-70b,decode,32,1024,23.9
+# ── A100-80GB / llama-8b ─────────────────────────────────────────────
+A100-80GB,llama-8b,prefill,1,64,1.04
+A100-80GB,llama-8b,prefill,1,128,2.07
+A100-80GB,llama-8b,prefill,1,256,4.14
+A100-80GB,llama-8b,prefill,1,512,8.28
+A100-80GB,llama-8b,prefill,1,1024,16.56
+A100-80GB,llama-8b,prefill,1,2048,33.13
+A100-80GB,llama-8b,decode,1,128,26.7
+A100-80GB,llama-8b,decode,1,512,27.1
+A100-80GB,llama-8b,decode,1,1024,27.9
+A100-80GB,llama-8b,decode,8,512,27.5
+A100-80GB,llama-8b,decode,16,1024,30.2
+A100-80GB,llama-8b,decode,32,1024,36.4
