@@ -1,2 +1,2 @@
 # inference-sim
-Simulator with Go
+Simulator with Rust
