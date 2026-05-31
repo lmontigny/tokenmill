@@ -43,6 +43,8 @@ cargo run --release -- \
 | `--output-mean` | `128.0` | Mean output length (log-normal, tokens) |
 | `--tp` | `1` | Tensor parallelism degree |
 | `--pp` | `1` | Pipeline parallelism degree |
+| `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
+| `--internode-bw-gbps` | `200` | Network bandwidth for KV transfer (GB/s) |
 | `--kernel-table` | — | CSV file with profiled kernel latencies |
 | `--kv-block-size` | `16` | Tokens per KV cache block |
 | `--kv-blocks` | `0` | KV cache blocks (0 = auto from GPU HBM) |
@@ -76,5 +78,5 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 | 2 | ✅ | KV cache block manager, batch decode iterations, chunked-prefill scheduler |
 | 3 | ✅ | Kernel time table (CSV), linear interpolation, roofline fallback |
 | 4 | ✅ | Multi-GPU: tensor parallelism + pipeline parallelism |
-| 5 | 🔜 | Disaggregated prefill/decode |
+| 5 | ✅ | Disaggregated prefill/decode with KV transfer latency |
 | 6 | 🔜 | Trace replay, JSON/CSV output |

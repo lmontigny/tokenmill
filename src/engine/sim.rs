@@ -21,7 +21,11 @@ pub enum SchedulerKind {
 pub struct Simulator {
     pub clock: SimTime,
     queue: SimQueue,
-    gpu: GpuState,
+    /// Prefill GPU (or the only GPU in non-disaggregated mode).
+    prefill_gpu: GpuState,
+    /// Dedicated decode GPU — only present in disaggregated mode.
+    /// In non-disaggregated mode this is None and prefill_gpu handles decode too.
+    decode_gpu: Option<GpuState>,
     model: LlmConfig,
     cluster: ClusterConfig,
     scheduler: SchedulerKind,
@@ -29,19 +33,19 @@ pub struct Simulator {
     kv: KvCacheManager,
 
     waiting: Vec<InferenceRequest>,
-    // Requests currently in prefill phase
     prefilling: FxHashMap<u64, RequestState>,
-    // Requests in decode phase: req_id → (state, current step)
+    /// Requests in decode: req_id → (state, current_step).
     decoding: FxHashMap<u64, (RequestState, u32)>,
+    /// Requests whose KV cache is in transit (disaggregated mode only).
+    transferring: FxHashMap<u64, RequestState>,
     prefill_progress: FxHashMap<u64, u32>,
-
-    // Whether a BatchDecodeStep is already scheduled (avoid duplicate events)
     decode_scheduled: bool,
 }
 
 impl Simulator {
     pub fn new(
-        gpu: GpuState,
+        prefill_gpu: GpuState,
+        decode_gpu: Option<GpuState>,
         model: LlmConfig,
         cluster: ClusterConfig,
         scheduler: SchedulerKind,
@@ -54,18 +58,23 @@ impl Simulator {
         }
         queue.push(0.0, EventPayload::SchedulerTick);
 
+        let mut metrics = MetricsCollector::new();
+        metrics.disaggregated = cluster.disaggregate;
+
         Self {
             clock: 0.0,
             queue,
-            gpu,
+            prefill_gpu,
+            decode_gpu,
             model,
             cluster,
             scheduler,
-            metrics: MetricsCollector::new(),
+            metrics,
             kv,
             waiting: Vec::new(),
             prefilling: FxHashMap::default(),
             decoding: FxHashMap::default(),
+            transferring: FxHashMap::default(),
             prefill_progress: FxHashMap::default(),
             decode_scheduled: false,
         }
@@ -85,6 +94,9 @@ impl Simulator {
                 EventPayload::PrefillDone { req_id, gpu_id } => {
                     self.handle_prefill_done(req_id, gpu_id)
                 }
+                EventPayload::KvTransfer { req_id, kv_bytes } => {
+                    self.handle_kv_transfer(req_id, kv_bytes)
+                }
                 EventPayload::BatchDecodeStep { gpu_id } => {
                     self.decode_scheduled = false;
                     self.handle_batch_decode_step(gpu_id)
@@ -99,6 +111,26 @@ impl Simulator {
         self.metrics.kv_util_final = self.kv.utilization();
     }
 
+    // ── GPU helpers ──────────────────────────────────────────────────────────
+
+    fn decode_gpu_id(&self) -> u32 {
+        self.decode_gpu.as_ref().map(|g| g.id).unwrap_or(self.prefill_gpu.id)
+    }
+
+    fn decode_gpu_busy_until(&self) -> SimTime {
+        self.decode_gpu.as_ref().map(|g| g.busy_until).unwrap_or(self.prefill_gpu.busy_until)
+    }
+
+    fn set_decode_gpu_busy(&mut self, until: SimTime) {
+        if let Some(g) = self.decode_gpu.as_mut() {
+            g.busy_until = until;
+        } else {
+            self.prefill_gpu.busy_until = until;
+        }
+    }
+
+    // ── Event handlers ───────────────────────────────────────────────────────
+
     fn handle_arrival(&mut self, req: InferenceRequest) -> Vec<(SimTime, EventPayload)> {
         self.waiting.push(req);
         vec![(self.clock, EventPayload::SchedulerTick)]
@@ -106,13 +138,16 @@ impl Simulator {
 
     fn handle_scheduler_tick(&mut self) -> Vec<(SimTime, EventPayload)> {
         let mut new_events = Vec::new();
-        let running_states: Vec<RequestState> =
-            self.prefilling.values().chain(self.decoding.values().map(|(s, _)| s)).cloned().collect();
+        let running: Vec<RequestState> = self.prefilling.values()
+            .chain(self.transferring.values())
+            .chain(self.decoding.values().map(|(s, _)| s))
+            .cloned()
+            .collect();
 
         match &self.scheduler {
             SchedulerKind::Continuous(_) => {
                 let admit = if let SchedulerKind::Continuous(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running_states, self.kv.free_blocks, self.kv.block_size, self.clock).admit
+                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock).admit
                 } else { unreachable!() };
                 for req_id in admit {
                     new_events.extend(self.admit_request(req_id, None));
@@ -120,7 +155,7 @@ impl Simulator {
             }
             SchedulerKind::Chunked(_) => {
                 let admit = if let SchedulerKind::Chunked(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running_states, self.kv.free_blocks, self.kv.block_size, self.clock).admit
+                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock).admit
                 } else { unreachable!() };
                 for (req_id, chunk) in admit {
                     new_events.extend(self.admit_request(req_id, Some(chunk)));
@@ -148,57 +183,96 @@ impl Simulator {
         let mut state = RequestState::new(req);
         state.phase = RequestPhase::Prefilling;
         state.start_time = Some(self.clock);
-        state.gpu_id = Some(self.gpu.id);
+        state.gpu_id = Some(self.prefill_gpu.id);
         self.prefilling.insert(req_id, state);
         self.prefill_progress.insert(req_id, 0);
-
         self.metrics.record_kv_util(self.kv.utilization());
 
-        vec![(self.clock, EventPayload::PrefillStart { req_id, gpu_id: self.gpu.id, chunk_tokens })]
+        vec![(self.clock, EventPayload::PrefillStart {
+            req_id, gpu_id: self.prefill_gpu.id, chunk_tokens,
+        })]
     }
 
     fn handle_prefill_start(
         &mut self, req_id: u64, gpu_id: u32, chunk_tokens: u32,
     ) -> Vec<(SimTime, EventPayload)> {
         *self.prefill_progress.entry(req_id).or_insert(0) += chunk_tokens;
-        let start = self.gpu.busy_until.max(self.clock);
-        let kt = self.gpu.kernel_table.as_ref();
-        let latency = self.gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
+        let start = self.prefill_gpu.busy_until.max(self.clock);
+        let kt = self.prefill_gpu.kernel_table.as_ref();
+        let latency = self.prefill_gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
         let done_time = start + latency;
-        self.gpu.busy_until = done_time;
+        self.prefill_gpu.busy_until = done_time;
         vec![(done_time, EventPayload::PrefillDone { req_id, gpu_id })]
     }
 
-    fn handle_prefill_done(&mut self, req_id: u64, gpu_id: u32) -> Vec<(SimTime, EventPayload)> {
+    fn handle_prefill_done(&mut self, req_id: u64, _gpu_id: u32) -> Vec<(SimTime, EventPayload)> {
         let total_prompt = self.prefilling.get(&req_id).map(|s| s.req.prompt_tokens).unwrap_or(0);
         let done_so_far = self.prefill_progress.get(&req_id).copied().unwrap_or(0);
         let remaining = total_prompt.saturating_sub(done_so_far);
 
         if remaining > 0 {
-            // Still more prefill chunks (chunked-prefill mode)
             let chunk = match &self.scheduler {
                 SchedulerKind::Chunked(s) => remaining.min(s.chunk_size),
                 _ => remaining,
             };
             *self.prefill_progress.entry(req_id).or_insert(0) += chunk;
-            return vec![(self.clock, EventPayload::PrefillStart { req_id, gpu_id, chunk_tokens: chunk })];
+            return vec![(self.clock, EventPayload::PrefillStart {
+                req_id, gpu_id: self.prefill_gpu.id, chunk_tokens: chunk,
+            })];
         }
 
-        // Prefill complete → move to decode
-        if let Some(mut state) = self.prefilling.remove(&req_id) {
-            state.first_token_time = Some(self.clock);
-            state.phase = RequestPhase::Decoding;
-            if let Some(ttft) = state.ttft() {
-                self.metrics.record_ttft(ttft);
+        // Prefill complete — record prefill latency.
+        if let Some(state) = self.prefilling.get_mut(&req_id) {
+            state.prefill_done_time = Some(self.clock);
+            if let Some(pl) = state.prefill_latency() {
+                self.metrics.record_prefill_latency(pl);
             }
-            self.decoding.insert(req_id, (state, 0));
         }
         self.prefill_progress.remove(&req_id);
 
-        // Kick off decode batch if not already scheduled
+        if self.cluster.disaggregate {
+            // Disaggregated: transfer KV cache over the network before decode can start.
+            let (kv_bytes, state) = if let Some(mut s) = self.prefilling.remove(&req_id) {
+                let bytes = self.model.kv_bytes(s.req.prompt_tokens);
+                s.phase = RequestPhase::Transferring;
+                (bytes, s)
+            } else {
+                return vec![];
+            };
+            self.transferring.insert(req_id, state);
+            vec![(self.clock, EventPayload::KvTransfer { req_id, kv_bytes })]
+        } else {
+            // Coupled: decode starts immediately on the same GPU.
+            self.move_to_decoding(req_id)
+        }
+    }
+
+    fn handle_kv_transfer(&mut self, req_id: u64, kv_bytes: u64) -> Vec<(SimTime, EventPayload)> {
+        let latency = self.cluster.kv_transfer_latency(kv_bytes);
+        let done_time = self.clock + latency;
+        // Transfer completes at done_time → move request to decode pool.
+        // We schedule a zero-cost "transfer done" by re-using SchedulerTick after the delay,
+        // but it's cleaner to inline: push a BatchDecodeStep timed at done_time.
+        // First move the state out of transferring into decoding.
+        if let Some(state) = self.transferring.remove(&req_id) {
+            self.decoding.insert(req_id, (state, 0));
+        }
+
+        // Kick off (or join) the decode batch at the transfer completion time.
         if !self.decode_scheduled {
             self.decode_scheduled = true;
-            return vec![(self.clock, EventPayload::BatchDecodeStep { gpu_id })];
+            return vec![(done_time, EventPayload::BatchDecodeStep { gpu_id: self.decode_gpu_id() })];
+        }
+        vec![]
+    }
+
+    fn move_to_decoding(&mut self, req_id: u64) -> Vec<(SimTime, EventPayload)> {
+        if let Some(state) = self.prefilling.remove(&req_id) {
+            self.decoding.insert(req_id, (state, 0));
+        }
+        if !self.decode_scheduled {
+            self.decode_scheduled = true;
+            return vec![(self.clock, EventPayload::BatchDecodeStep { gpu_id: self.decode_gpu_id() })];
         }
         vec![]
     }
@@ -208,29 +282,49 @@ impl Simulator {
             return vec![];
         }
 
-        // Compute batch decode latency.
         let batch_size = self.decoding.len() as u32;
         let avg_kv_len = {
             let total: u32 = self.decoding.values().map(|(s, step)| s.req.prompt_tokens + step).sum();
             total / batch_size.max(1)
         };
-        let kt = self.gpu.kernel_table.as_ref();
-        let latency = self.gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
 
-        let start = self.gpu.busy_until.max(self.clock);
+        // Use decode GPU's kernel table if available (may differ from prefill GPU in disagg mode).
+        let kt = self.decode_gpu.as_ref()
+            .and_then(|g| g.kernel_table.as_ref())
+            .or_else(|| self.prefill_gpu.kernel_table.as_ref());
+
+        let latency = self.prefill_gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
+
+        let start = self.decode_gpu_busy_until().max(self.clock);
         let done_time = start + latency;
-        self.gpu.busy_until = done_time;
+        self.set_decode_gpu_busy(done_time);
 
-        // Advance all decoding requests by one token; collect completed ones
+        // Advance all decoding requests by one step.
         let req_ids: Vec<u64> = self.decoding.keys().copied().collect();
         let mut completed = Vec::new();
+        let mut first_token_ids = Vec::new(); // requests getting their very first token this step
+
         for req_id in req_ids {
-            // Read max_steps before taking a mutable borrow to satisfy the borrow checker.
             let max_steps = self.decoding.get(&req_id).map(|(s, _)| s.req.max_output_tokens).unwrap_or(0);
             if let Some((_, step)) = self.decoding.get_mut(&req_id) {
+                if *step == 0 {
+                    first_token_ids.push(req_id);
+                }
                 *step += 1;
                 if *step >= max_steps {
                     completed.push(req_id);
+                }
+            }
+        }
+
+        // Record first-token time (true TTFT: includes KV transfer in disaggregated mode).
+        for req_id in first_token_ids {
+            if let Some((state, _)) = self.decoding.get_mut(&req_id) {
+                state.first_token_time = Some(done_time);
+                let ttft = done_time - state.req.arrival_time;
+                self.metrics.record_ttft(ttft);
+                if let Some(kv_t) = state.kv_transfer_time() {
+                    self.metrics.record_kv_transfer(kv_t);
                 }
             }
         }
@@ -249,18 +343,13 @@ impl Simulator {
         }
 
         let mut new_events = Vec::new();
-
-        // Schedule next batch decode if there are still decoding requests
         if !self.decoding.is_empty() {
             self.decode_scheduled = true;
             new_events.push((done_time, EventPayload::BatchDecodeStep { gpu_id }));
         } else {
             self.decode_scheduled = false;
         }
-
-        // After decode step, check if waiting requests can be admitted
         new_events.push((done_time, EventPayload::SchedulerTick));
-
         new_events
     }
 }

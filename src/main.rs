@@ -66,13 +66,21 @@ struct Args {
     #[arg(long, default_value_t = 0)]
     kv_blocks: u32,
 
-    /// Tensor parallelism degree (splits each layer across N GPUs)
+    /// Tensor parallelism degree
     #[arg(long, default_value_t = 1)]
     tp: u32,
 
-    /// Pipeline parallelism degree (splits layer stack into N sequential stages)
+    /// Pipeline parallelism degree
     #[arg(long, default_value_t = 1)]
     pp: u32,
+
+    /// Disaggregate prefill and decode onto separate GPUs connected over internode_bw
+    #[arg(long)]
+    disaggregate: bool,
+
+    /// Internode bandwidth in GB/s (used for KV transfer in disaggregated mode)
+    #[arg(long, default_value_t = 200.0)]
+    internode_bw_gbps: f64,
 
     /// Kernel time table CSV (enables profiled latencies; falls back to roofline on miss)
     #[arg(long)]
@@ -92,9 +100,6 @@ fn main() {
     let model = LlmConfig::preset(&args.model)
         .unwrap_or_else(|| panic!("Unknown model '{}'. Use: llama-70b, llama-8b, mixtral-8x7b", args.model));
 
-    // Auto-size KV cache: (HBM - weights) × 80% / bytes_per_block.
-    // If model is larger than a single GPU's HBM (e.g. llama-70b without TP),
-    // fall back to 20% of HBM — TP is modelled in Phase 4.
     let kv_total_blocks = if args.kv_blocks > 0 {
         args.kv_blocks
     } else {
@@ -117,11 +122,13 @@ fn main() {
     };
 
     let latency_mode = if args.kernel_table.is_some() { "kernel-table+roofline" } else { "roofline" };
-    let parallelism = match (args.tp, args.pp) {
-        (1, 1) => "single-gpu".to_string(),
-        (tp, 1) => format!("TP={tp}"),
-        (1, pp) => format!("PP={pp}"),
-        (tp, pp) => format!("TP={tp} PP={pp}"),
+    let parallelism = match (args.tp, args.pp, args.disaggregate) {
+        (1, 1, false) => "single-gpu".to_string(),
+        (1, 1, true)  => "disaggregated".to_string(),
+        (tp, 1, false) => format!("TP={tp}"),
+        (1, pp, false) => format!("PP={pp}"),
+        (tp, pp, false) => format!("TP={tp} PP={pp}"),
+        (tp, pp, true)  => format!("TP={tp} PP={pp} disaggregated"),
     };
     println!(
         "Running: {} on {} | {} | scheduler={} | latency={} | arrival={} req/s | duration={}s",
@@ -136,26 +143,35 @@ fn main() {
         tp: args.tp,
         pp: args.pp,
         nvlink_bw: gpu_spec.nvlink_bandwidth,
-        internode_bw: 200e9, // 200 GB/s InfiniBand HDR default
+        internode_bw: args.internode_bw_gbps * 1e9,
+        disaggregate: args.disaggregate,
     };
 
-    let mut gpu = GpuState::new(0, gpu_spec);
-    if let Some(path) = &args.kernel_table {
+    let kt = args.kernel_table.as_ref().and_then(|path| {
         match KernelTable::from_csv(Path::new(path)) {
-            Ok(kt) => {
-                println!("Kernel table loaded: {}", path);
-                gpu = gpu.with_kernel_table(kt);
-            }
-            Err(e) => eprintln!("Warning: could not load kernel table '{}': {}", path, e),
+            Ok(kt) => { println!("Kernel table loaded: {}", path); Some(kt) }
+            Err(e) => { eprintln!("Warning: could not load kernel table '{}': {}", path, e); None }
         }
-    }
+    });
+
+    let mut prefill_gpu = GpuState::new(0, gpu_spec.clone());
+    if let Some(ref k) = kt { prefill_gpu = prefill_gpu.with_kernel_table(k.clone()); }
+
+    // In disaggregated mode, spin up a second GPU for decode (same spec, id=1).
+    let decode_gpu = if args.disaggregate {
+        let mut g = GpuState::new(1, gpu_spec);
+        if let Some(k) = kt { g = g.with_kernel_table(k); }
+        Some(g)
+    } else {
+        None
+    };
 
     let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
     let workload = SyntheticWorkload::new(
         args.arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed,
     );
 
-    let mut sim = Simulator::new(gpu, model, cluster, scheduler, workload, kv);
+    let mut sim = Simulator::new(prefill_gpu, decode_gpu, model, cluster, scheduler, workload, kv);
     sim.run(args.duration);
     sim.metrics.print_report();
 }

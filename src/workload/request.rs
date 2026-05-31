@@ -14,6 +14,7 @@ pub struct InferenceRequest {
 pub enum RequestPhase {
     Waiting,
     Prefilling,
+    Transferring, // KV transfer in flight (disaggregated mode only)
     Decoding,
     Done,
 }
@@ -23,7 +24,8 @@ pub struct RequestState {
     pub req: InferenceRequest,
     pub phase: RequestPhase,
     pub start_time: Option<SimTime>,
-    pub first_token_time: Option<SimTime>,
+    pub prefill_done_time: Option<SimTime>,  // when prefill completed
+    pub first_token_time: Option<SimTime>,   // when first decode token was produced (true TTFT)
     pub completion_time: Option<SimTime>,
     pub gpu_id: Option<u32>,
 }
@@ -34,14 +36,29 @@ impl RequestState {
             req,
             phase: RequestPhase::Waiting,
             start_time: None,
+            prefill_done_time: None,
             first_token_time: None,
             completion_time: None,
             gpu_id: None,
         }
     }
 
+    /// True TTFT: time from arrival to first output token (includes KV transfer in disaggregated mode).
     pub fn ttft(&self) -> Option<f64> {
         self.first_token_time.map(|t| t - self.req.arrival_time)
+    }
+
+    /// Prefill latency: arrival → end of prefill (excludes KV transfer and decode).
+    pub fn prefill_latency(&self) -> Option<f64> {
+        self.prefill_done_time.map(|t| t - self.req.arrival_time)
+    }
+
+    /// KV transfer time (only non-zero in disaggregated mode).
+    pub fn kv_transfer_time(&self) -> Option<f64> {
+        match (self.prefill_done_time, self.first_token_time) {
+            (Some(pd), Some(ft)) => Some((ft - pd).max(0.0)),
+            _ => None,
+        }
     }
 
     pub fn tpot(&self) -> Option<f64> {

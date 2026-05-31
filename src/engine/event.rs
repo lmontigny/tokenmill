@@ -9,6 +9,8 @@ pub enum EventPayload {
     RequestArrival { req: InferenceRequest },
     PrefillStart { req_id: RequestId, gpu_id: GpuId, chunk_tokens: u32 },
     PrefillDone { req_id: RequestId, gpu_id: GpuId },
+    // KV cache transfer from prefill node to decode node (disaggregated PD only).
+    KvTransfer { req_id: RequestId, kv_bytes: u64 },
     // One batch decode iteration: all running decode requests advance one token together.
     BatchDecodeStep { gpu_id: GpuId },
     SchedulerTick,

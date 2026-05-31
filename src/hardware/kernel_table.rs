@@ -21,7 +21,7 @@ impl KernelOp {
 
 // Lookup key — exact match first, then we interpolate on seq_len.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct KernelKey {
+pub struct KernelKey {
     gpu: String,
     model: String,
     op: KernelOp,
@@ -48,9 +48,9 @@ struct CsvRecord {
     latency_ms: f64,
 }
 
+#[derive(Clone)]
 pub struct KernelTable {
     exact: FxHashMap<KernelKey, f64>,
-    // For interpolation: partial key → sorted vec of (seq_len, latency_s)
     by_seq: FxHashMap<PartialKey, Vec<(u32, f64)>>,
 }
 

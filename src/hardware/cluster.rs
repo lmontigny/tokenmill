@@ -14,15 +14,26 @@
 pub struct ClusterConfig {
     pub tp: u32,
     pub pp: u32,
-    /// NVLink bandwidth per direction in bytes/sec (used for all-reduce and PP transfers).
+    /// NVLink bandwidth per direction in bytes/sec (all-reduce and intranode PP transfers).
     pub nvlink_bw: f64,
-    /// Cross-node bandwidth in bytes/sec (used for PP when stages span servers).
+    /// Cross-node bandwidth in bytes/sec (PP inter-server and KV transfer in disaggregated PD).
     pub internode_bw: f64,
+    /// If true, prefill and decode run on separate GPU pools connected over internode_bw.
+    pub disaggregate: bool,
 }
 
 impl ClusterConfig {
     pub fn single_gpu() -> Self {
-        Self { tp: 1, pp: 1, nvlink_bw: 0.0, internode_bw: 0.0 }
+        Self { tp: 1, pp: 1, nvlink_bw: 0.0, internode_bw: 0.0, disaggregate: false }
+    }
+
+    /// KV transfer latency from prefill node to decode node (seconds).
+    /// kv_bytes: size of the KV cache for the completed prompt.
+    pub fn kv_transfer_latency(&self, kv_bytes: u64) -> f64 {
+        if !self.disaggregate || self.internode_bw <= 0.0 {
+            return 0.0;
+        }
+        kv_bytes as f64 / self.internode_bw
     }
 
     /// All-reduce latency for ring-allreduce over NVLink (seconds).
