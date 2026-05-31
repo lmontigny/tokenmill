@@ -108,6 +108,11 @@ struct Args {
     /// Random seed
     #[arg(long, default_value_t = 42)]
     seed: u64,
+
+    /// Validate roofline model against a reference CSV (gpu,model,op,batch_size,seq_len,latency_ms).
+    /// Prints MAPE per category and suggests MFU adjustments. Does not run a simulation.
+    #[arg(long)]
+    validate_kernels: Option<String>,
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -345,10 +350,116 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     )
 }
 
+// ── validate_kernels ──────────────────────────────────────────────────────────
+
+struct RefRow {
+    gpu: String,
+    model: String,
+    op: String,
+    batch: u32,
+    seq_len: u32,
+    ref_ms: f64,
+}
+
+fn load_reference_csv(path: &str) -> Result<Vec<RefRow>, Box<dyn std::error::Error>> {
+    let mut rdr = csv::ReaderBuilder::new()
+        .comment(Some(b'#'))
+        .trim(csv::Trim::All)
+        .from_path(path)?;
+    let mut rows = Vec::new();
+    for rec in rdr.records() {
+        let rec = rec?;
+        rows.push(RefRow {
+            gpu:     rec.get(0).ok_or("missing gpu")?.to_string(),
+            model:   rec.get(1).ok_or("missing model")?.to_string(),
+            op:      rec.get(2).ok_or("missing op")?.to_string(),
+            batch:   rec.get(3).ok_or("missing batch_size")?.parse()?,
+            seq_len: rec.get(4).ok_or("missing seq_len")?.parse()?,
+            ref_ms:  rec.get(5).ok_or("missing latency_ms")?.parse()?,
+        });
+    }
+    Ok(rows)
+}
+
+fn validate_kernels(path: &str) {
+    let rows = match load_reference_csv(path) {
+        Ok(r) => r,
+        Err(e) => { eprintln!("Cannot load reference CSV '{}': {}", path, e); return; }
+    };
+
+    let sep = "─".repeat(72);
+    println!("Roofline vs reference  {}", sep);
+    println!("{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9} {:>9} {:>8}",
+        "GPU", "Model", "Op", "Batch", "SeqLen", "Ref(ms)", "Sim(ms)", "Err%");
+    println!("{}", sep);
+
+    struct GroupStats { sum_abs_err: f64, count: u32 }
+    let mut groups: std::collections::BTreeMap<(String, String), GroupStats> = std::collections::BTreeMap::new();
+
+    for row in &rows {
+        let gpu_spec = match GpuSpec::preset(&row.gpu.to_lowercase()
+            .replace("h100-sxm5", "h100").replace("a100-80gb", "a100").replace("a10g", "a10g"))
+        {
+            Some(g) => g,
+            None => {
+                // Try lowercase match more carefully
+                let key = if row.gpu.contains("H100") { "h100" }
+                    else if row.gpu.contains("A100") { "a100" }
+                    else if row.gpu.contains("A10G") { "a10g" }
+                    else { eprintln!("Unknown GPU '{}', skipping", row.gpu); continue; };
+                match GpuSpec::preset(key) {
+                    Some(g) => g,
+                    None => { eprintln!("Unknown GPU '{}', skipping", row.gpu); continue; }
+                }
+            }
+        };
+        let model = match LlmConfig::preset(&row.model) {
+            Some(m) => m,
+            None => { eprintln!("Unknown model '{}', skipping", row.model); continue; }
+        };
+
+        let cluster = ClusterConfig::single_gpu();
+        let sim_ms = match row.op.as_str() {
+            "prefill" => gpu_spec.prefill_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0,
+            "decode"  => gpu_spec.decode_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0,
+            other => { eprintln!("Unknown op '{}', skipping", other); continue; }
+        };
+
+        let err_pct = (sim_ms - row.ref_ms) / row.ref_ms * 100.0;
+        let marker = if err_pct.abs() > 20.0 { " !" } else if err_pct.abs() > 10.0 { " ?" } else { "" };
+        println!("{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9.2} {:>9.2} {:>+7.1}%{}",
+            row.gpu, row.model, row.op, row.batch, row.seq_len, row.ref_ms, sim_ms, err_pct, marker);
+
+        let key = (row.gpu.clone(), row.op.clone());
+        let entry = groups.entry(key).or_insert(GroupStats { sum_abs_err: 0.0, count: 0 });
+        entry.sum_abs_err += err_pct.abs();
+        entry.count += 1;
+    }
+
+    println!("{}", sep);
+    println!("MAPE by group:");
+    for ((gpu, op), stats) in &groups {
+        let mape = stats.sum_abs_err / stats.count as f64;
+        let flag = if mape > 20.0 { " ← HIGH" } else if mape > 10.0 { " ← marginal" } else { "" };
+        println!("  {:<16} {:>7}: {:>5.1}% MAPE  (n={}){}",
+            gpu, op, mape, stats.count, flag);
+    }
+    println!("{}", sep);
+    println!();
+    println!("To reduce error: tune mfu_prefill/mfu_decode in GpuSpec::preset().");
+    println!("  If sim > ref: increase the corresponding MFU (GPU is more efficient than modeled).");
+    println!("  If sim < ref: decrease MFU. Target < 10% MAPE for production accuracy.");
+}
+
 // ── main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
     let args = Args::parse();
+
+    if let Some(ref path) = args.validate_kernels {
+        validate_kernels(path);
+        return;
+    }
 
     let kt: Option<KernelTable> = args.kernel_table.as_deref().and_then(load_kernel_table);
 

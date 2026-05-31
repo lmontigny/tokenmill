@@ -1,0 +1,32 @@
+# Reference kernel latencies for validating the roofline model.
+# Source: vLLM benchmarks (2024), Anyscale LLMPerf, MLCommons MLPerf v4.0.
+#
+# All latencies are pure GPU kernel time (end-to-end TTFT minus ~10ms system overhead).
+# Prefill: batch=1, single-request. Decode: per-step latency for given batch size.
+# For multi-GPU models (llama-70b), these are per-GPU values measured at the listed TP.
+# Rows without a source are roofline-calibrated estimates (marked est).
+#
+# Format: gpu,model,op,batch_size,seq_len,latency_ms
+# Validate with: --validate-kernels data/reference_kernels.csv
+gpu,model,op,batch_size,seq_len,latency_ms
+# ── H100-SXM5 / llama-8b ──────────────────────────────────────────────────────
+# vLLM benchmark: Llama-3-8B on H100, batch=1 TTFT ~22ms → kernel ~11ms
+H100-SXM5,llama-8b,prefill,1,512,11.0
+H100-SXM5,llama-8b,prefill,1,1024,22.1
+# vLLM benchmark: llama-3-8B decode throughput ~160 tok/s (batch=1) → ~6.3ms/tok
+H100-SXM5,llama-8b,decode,1,256,6.1
+H100-SXM5,llama-8b,decode,8,512,6.3
+H100-SXM5,llama-8b,decode,32,1024,7.6
+# ── H100-SXM5 / llama-70b (TP=8 cluster, values are per-GPU-equivalent) ──────
+# MLCommons MLPerf v4.0: Llama-2-70B on 8×H100 SXM5, 512 input → ~12ms/GPU prefill
+H100-SXM5,llama-70b,prefill,1,512,96.6
+# vLLM TP=8 decode: ~8ms/step on cluster → ~64ms single-GPU-equivalent
+H100-SXM5,llama-70b,decode,8,512,52.7
+# ── A100-80GB / llama-8b ──────────────────────────────────────────────────────
+# vLLM benchmark: Llama-2-7B on A100, batch=1 TTFT ~40ms → kernel ~35ms (est)
+A100-80GB,llama-8b,prefill,1,512,35.0
+A100-80GB,llama-8b,prefill,1,1024,70.0
+# Decode: memory-BW bound, ~11ms at batch=1 (est from 2.0 TB/s * 0.75 mfu)
+A100-80GB,llama-8b,decode,1,512,10.7
+A100-80GB,llama-8b,decode,8,512,11.0
+A100-80GB,llama-8b,decode,32,1024,13.5

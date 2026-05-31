@@ -103,16 +103,20 @@ impl GpuSpec {
     }
 
     fn roofline_prefill(&self, batch: u32, seq_len: u32, model: &LlmConfig) -> f64 {
-        let base_flops =
-            2.0 * batch as f64 * seq_len as f64 * model.d_model as f64 * model.n_layers as f64 * 12.0;
-        // Scale active FLOPs for MoE (only top-K experts run per token).
-        let active_flops = base_flops * model.active_param_fraction();
-        active_flops / (self.flops_bf16 * self.mfu_prefill)
+        // Standard transformer FLOPs: 2 × batch × seq × active_params.
+        // active_params = weight_bytes_active / dtype_bytes — covers both dense and MoE correctly.
+        // This follows from the "6N per token for training, 2N for inference" rule:
+        //   FLOPs ≈ 2 × seq × N  where N = non-embedding parameter count.
+        // The embedding lookup contributes no FLOPs, but it's ≤2% of total params,
+        // so using weight_bytes/dtype as N is accurate to within that margin.
+        let active_params = model.weight_bytes_active() as f64 / model.dtype_bytes as f64;
+        let flops = 2.0 * batch as f64 * seq_len as f64 * active_params;
+        flops / (self.flops_bf16 * self.mfu_prefill)
     }
 
     fn roofline_decode(&self, batch: u32, avg_kv_len: u32, model: &LlmConfig) -> f64 {
+        // Memory-BW bound: load active weights once + read each request's KV cache.
         let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
-        // Use active weight bytes for MoE (only loaded experts contribute to BW).
         (model.weight_bytes_active() + kv_bytes) as f64 / (self.hbm_bandwidth * self.mfu_decode)
     }
 
@@ -124,8 +128,8 @@ impl GpuSpec {
                 hbm_bandwidth: 3.35e12,
                 hbm_capacity: 80_000_000_000,
                 nvlink_bandwidth: 900e9,
-                mfu_prefill: 0.50,
-                mfu_decode: 0.30,
+                mfu_prefill: 0.75,
+                mfu_decode: 0.80,
             }),
             "a100" => Some(Self {
                 name: "A100-80GB".into(),
@@ -133,8 +137,8 @@ impl GpuSpec {
                 hbm_bandwidth: 2.0e12,
                 hbm_capacity: 80_000_000_000,
                 nvlink_bandwidth: 600e9,
-                mfu_prefill: 0.50,
-                mfu_decode: 0.30,
+                mfu_prefill: 0.75,
+                mfu_decode: 0.75,
             }),
             "a10g" => Some(Self {
                 name: "A10G".into(),
@@ -142,8 +146,8 @@ impl GpuSpec {
                 hbm_bandwidth: 600e9,
                 hbm_capacity: 24_000_000_000,
                 nvlink_bandwidth: 0.0,
-                mfu_prefill: 0.45,
-                mfu_decode: 0.25,
+                mfu_prefill: 0.55,
+                mfu_decode: 0.65,
             }),
             _ => None,
         }
