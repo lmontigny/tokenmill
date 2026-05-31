@@ -14,7 +14,7 @@ pub struct InferenceRequest {
 pub enum RequestPhase {
     Waiting,
     Prefilling,
-    Decoding { step: u32 },
+    Decoding,
     Done,
 }
 

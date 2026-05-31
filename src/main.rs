@@ -7,9 +7,11 @@ mod workload;
 
 use clap::Parser;
 
-use engine::sim::Simulator;
+use engine::sim::{Simulator, SchedulerKind};
 use hardware::gpu::GpuState;
+use model::kv_cache::KvCacheManager;
 use model::llm_config::LlmConfig;
+use scheduler::chunked_prefill::ChunkedPrefillScheduler;
 use scheduler::continuous_batch::ContinuousBatchScheduler;
 use workload::synthetic::SyntheticWorkload;
 
@@ -23,6 +25,14 @@ struct Args {
     /// Model preset: llama-70b | llama-8b | mixtral-8x7b
     #[arg(long, default_value = "llama-70b")]
     model: String,
+
+    /// Scheduler: continuous-batch | chunked-prefill
+    #[arg(long, default_value = "continuous-batch")]
+    scheduler: String,
+
+    /// Chunk size for chunked-prefill scheduler (tokens)
+    #[arg(long, default_value_t = 512)]
+    chunk_size: u32,
 
     /// Request arrival rate (req/s)
     #[arg(long, default_value_t = 5.0)]
@@ -40,9 +50,17 @@ struct Args {
     #[arg(long, default_value_t = 128.0)]
     output_mean: f64,
 
-    /// Max tokens in flight (scheduler budget)
+    /// Max tokens in flight across all requests
     #[arg(long, default_value_t = 8192)]
     max_batch_tokens: u32,
+
+    /// KV cache block size (tokens per block)
+    #[arg(long, default_value_t = 16)]
+    kv_block_size: u32,
+
+    /// KV cache total blocks (0 = auto-size to 80% of GPU HBM after weights)
+    #[arg(long, default_value_t = 0)]
+    kv_blocks: u32,
 
     /// Random seed
     #[arg(long, default_value_t = 42)]
@@ -53,18 +71,51 @@ fn main() {
     let args = Args::parse();
 
     let gpu_spec = hardware::gpu::GpuSpec::preset(&args.gpu)
-        .unwrap_or_else(|| panic!("Unknown GPU preset '{}'. Use: h100, a100, a10g", args.gpu));
+        .unwrap_or_else(|| panic!("Unknown GPU '{}'. Use: h100, a100, a10g", args.gpu));
 
     let model = LlmConfig::preset(&args.model)
-        .unwrap_or_else(|| panic!("Unknown model preset '{}'. Use: llama-70b, llama-8b, mixtral-8x7b", args.model));
+        .unwrap_or_else(|| panic!("Unknown model '{}'. Use: llama-70b, llama-8b, mixtral-8x7b", args.model));
+
+    // Auto-size KV cache: (HBM - weights) × 80% / bytes_per_block.
+    // If the model is larger than a single GPU's HBM (e.g. llama-70b on H100 without TP),
+    // fall back to 20% of HBM — multi-GPU TP is modelled in Phase 4.
+    let kv_total_blocks = if args.kv_blocks > 0 {
+        args.kv_blocks
+    } else {
+        let bytes_per_token = model.kv_bytes(1);
+        let bytes_per_block = (bytes_per_token * args.kv_block_size as u64).max(1);
+        let hbm = gpu_spec.hbm_capacity as f64;
+        let available = if model.weight_bytes < gpu_spec.hbm_capacity {
+            (hbm - model.weight_bytes as f64) * 0.80
+        } else {
+            hbm * 0.20 // model spans multiple GPUs; reserve a slice for KV accounting
+        };
+        ((available / bytes_per_block as f64) as u32).max(64)
+    };
+
+    let scheduler_name = args.scheduler.as_str();
+    let scheduler = match scheduler_name {
+        "continuous-batch" => SchedulerKind::Continuous(
+            ContinuousBatchScheduler::new(args.max_batch_tokens)
+        ),
+        "chunked-prefill" => SchedulerKind::Chunked(
+            ChunkedPrefillScheduler::new(args.chunk_size, args.max_batch_tokens)
+        ),
+        other => panic!("Unknown scheduler '{}'. Use: continuous-batch, chunked-prefill", other),
+    };
 
     println!(
-        "Running: {} on {} | arrival={} req/s | duration={}s | seed={}",
-        model.name, gpu_spec.name, args.arrival_rate, args.duration, args.seed
+        "Running: {} on {} | scheduler={} | arrival={} req/s | duration={}s",
+        model.name, gpu_spec.name, scheduler_name, args.arrival_rate, args.duration
+    );
+    println!(
+        "KV cache: {} blocks × {} tokens/block = {} total token slots",
+        kv_total_blocks, args.kv_block_size,
+        kv_total_blocks * args.kv_block_size
     );
 
     let gpu = GpuState::new(0, gpu_spec);
-    let scheduler = ContinuousBatchScheduler::new(args.max_batch_tokens);
+    let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
     let workload = SyntheticWorkload::new(
         args.arrival_rate,
         args.prompt_mean,
@@ -73,7 +124,7 @@ fn main() {
         args.seed,
     );
 
-    let mut sim = Simulator::new(gpu, model, scheduler, workload);
+    let mut sim = Simulator::new(gpu, model, scheduler, workload, kv);
     sim.run(args.duration);
     sim.metrics.print_report();
 }

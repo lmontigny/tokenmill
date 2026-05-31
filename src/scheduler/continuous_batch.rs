@@ -2,7 +2,7 @@ use crate::workload::request::{InferenceRequest, RequestState};
 
 pub struct BatchDecision {
     pub admit: Vec<u64>,    // req_ids to move from waiting → prefilling
-    pub decode: Vec<u64>,   // req_ids already in decode, continue
+    pub preempt: Vec<u64>,  // req_ids to evict from running (KV pressure)
 }
 
 pub struct ContinuousBatchScheduler {
@@ -18,27 +18,29 @@ impl ContinuousBatchScheduler {
         &self,
         waiting: &[InferenceRequest],
         running: &[RequestState],
+        kv_free_blocks: u32,
+        kv_block_size: u32,
         _now: f64,
     ) -> BatchDecision {
-        // Count tokens currently in flight
         let in_flight: u32 = running
             .iter()
             .map(|s| s.req.prompt_tokens + s.req.max_output_tokens)
             .sum();
 
         let mut admit = Vec::new();
-        let mut budget = self.max_batch_tokens.saturating_sub(in_flight);
+        let mut token_budget = self.max_batch_tokens.saturating_sub(in_flight);
+        let mut kv_budget = kv_free_blocks;
 
         for req in waiting {
-            let needed = req.prompt_tokens + req.max_output_tokens;
-            if needed <= budget {
+            let tokens = req.prompt_tokens + req.max_output_tokens;
+            let kv_blocks_needed = tokens.div_ceil(kv_block_size);
+            if tokens <= token_budget && kv_blocks_needed <= kv_budget {
                 admit.push(req.req_id);
-                budget -= needed;
+                token_budget -= tokens;
+                kv_budget -= kv_blocks_needed;
             }
         }
 
-        let decode = running.iter().map(|s| s.req.req_id).collect();
-
-        BatchDecision { admit, decode }
+        BatchDecision { admit, preempt: Vec::new() }
     }
 }

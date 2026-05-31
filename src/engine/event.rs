@@ -9,8 +9,8 @@ pub enum EventPayload {
     RequestArrival { req: InferenceRequest },
     PrefillStart { req_id: RequestId, gpu_id: GpuId, chunk_tokens: u32 },
     PrefillDone { req_id: RequestId, gpu_id: GpuId },
-    DecodeStep { req_id: RequestId, gpu_id: GpuId, step: u32 },
-    DecodeComplete { req_id: RequestId, gpu_id: GpuId },
+    // One batch decode iteration: all running decode requests advance one token together.
+    BatchDecodeStep { gpu_id: GpuId },
     SchedulerTick,
 }
 
