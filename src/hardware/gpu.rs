@@ -203,6 +203,41 @@ impl GpuSpec {
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
             }),
+            // AMD Instinct MI300X (CDNA 3, 2023) — H100 competitor with 2.4× more HBM at 1.6× BW.
+            // Infinity Fabric stored in `nvlink_bandwidth` (scale-up fabric is treated uniformly).
+            // MFU is conservative vs H100 — ROCm/vLLM kernel maturity gap.
+            "mi300x" => Some(Self {
+                name: "MI300X".into(),
+                flops_bf16: 1307e12,           // 1.307 PFLOPS BF16 matrix (dense)
+                flops_fp8: 2614e12,            // 2.614 PFLOPS FP8 matrix (dense)
+                hbm_bandwidth: 5.3e12,         // 5.3 TB/s HBM3 (1.58× H100)
+                hbm_capacity: 192_000_000_000, // 192 GB HBM3
+                nvlink_bandwidth: 896e9,       // Infinity Fabric: 896 GB/s aggregate per GPU
+                mfu_prefill: 0.65,
+                mfu_decode: 0.72,
+            }),
+            // AMD Instinct MI325X (CDNA 3 refresh, 2024) — same compute as MI300X, more memory.
+            "mi325x" => Some(Self {
+                name: "MI325X".into(),
+                flops_bf16: 1307e12,
+                flops_fp8: 2614e12,
+                hbm_bandwidth: 6.0e12,         // 6.0 TB/s HBM3e
+                hbm_capacity: 256_000_000_000, // 256 GB HBM3e
+                nvlink_bandwidth: 896e9,
+                mfu_prefill: 0.65,
+                mfu_decode: 0.72,
+            }),
+            // AMD Instinct MI355X (CDNA 4, 2025) — B200 competitor. FP4/FP6 not modeled.
+            "mi355x" => Some(Self {
+                name: "MI355X".into(),
+                flops_bf16: 2500e12,           // ~2.5 PFLOPS BF16 dense
+                flops_fp8: 5000e12,            // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
+                hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e
+                hbm_capacity: 288_000_000_000, // 288 GB HBM3e (50% more than B200)
+                nvlink_bandwidth: 1075e9,      // Infinity Fabric Gen 4: 1.075 TB/s
+                mfu_prefill: 0.65,
+                mfu_decode: 0.72,
+            }),
             "a10g" => Some(Self {
                 name: "A10G".into(),
                 flops_bf16: 125e12,

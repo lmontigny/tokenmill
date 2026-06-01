@@ -18,3 +18,4 @@ bash examples/02_chunked_prefill_under_load.sh
 | 8 | `08_trace_replay.sh` | Mooncake long-context trace replay |
 | 9 | `09_arrival_rate_sweep.sh` | Parallel arrival-rate sweep → CSV |
 | 10 | `10_b200_blackwell.sh` | B200 Blackwell — 2-3× faster than H100 on FP8 |
+| 11 | `11_amd_mi300x.sh` | AMD MI300X — 70B model fits on a single GPU (192 GB HBM) |

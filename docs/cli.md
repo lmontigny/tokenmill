@@ -4,7 +4,7 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | `h100` | GPU preset: `b200` \| `h100` \| `a100` \| `a10g` |
+| `--gpu` | `h100` | GPU preset: `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` |
 | `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -49,9 +49,14 @@ latent vector per layer — roughly 64× smaller than standard MHA — enabling 
 
 ## GPU presets
 
-| Preset | Family | BF16 TFLOPS | FP8 TFLOPS | HBM | HBM BW | NVLink |
+| Preset | Family | BF16 TFLOPS | FP8 TFLOPS | HBM | HBM BW | Scale-up BW |
 |---|---|---:|---:|---:|---:|---:|
-| `b200` | Blackwell | 2250 | 4500 | 192 GB | 8 TB/s | 1.8 TB/s |
-| `h100` | Hopper | 989 | 1978 | 80 GB | 3.35 TB/s | 900 GB/s |
-| `a100` | Ampere | 312 | — | 80 GB | 2 TB/s | 600 GB/s |
-| `a10g` | Ampere | 125 | — | 24 GB | 600 GB/s | — |
+| `b200` | NVIDIA Blackwell | 2250 | 4500 | 192 GB | 8 TB/s | 1.8 TB/s (NVLink 5) |
+| `h100` | NVIDIA Hopper | 989 | 1978 | 80 GB | 3.35 TB/s | 900 GB/s (NVLink 4) |
+| `a100` | NVIDIA Ampere | 312 | — | 80 GB | 2 TB/s | 600 GB/s (NVLink 3) |
+| `a10g` | NVIDIA Ampere | 125 | — | 24 GB | 600 GB/s | — |
+| `mi355x` | AMD CDNA 4 | 2500 | 5000 | 288 GB | 8 TB/s | 1.075 TB/s (IF Gen 4) |
+| `mi325x` | AMD CDNA 3 refresh | 1307 | 2614 | 256 GB | 6 TB/s | 896 GB/s (Infinity Fabric) |
+| `mi300x` | AMD CDNA 3 | 1307 | 2614 | 192 GB | 5.3 TB/s | 896 GB/s (Infinity Fabric) |
+
+The `nvlink_bandwidth` field is treated as a generic scale-up fabric bandwidth — Infinity Fabric for AMD GPUs uses the same all-reduce / all-to-all formulas. AMD MFU is set ~10% below the NVIDIA equivalent to reflect the ROCm vs CUDA kernel-maturity gap.

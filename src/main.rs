@@ -21,7 +21,7 @@ use inference_sim::workload::trace_replay::TraceReplay;
     about = "LLM inference discrete-event simulator"
 )]
 struct Args {
-    /// GPU preset: h100 | a100 | a10g
+    /// GPU preset: b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x
     #[arg(long, default_value = "h100")]
     gpu: String,
 

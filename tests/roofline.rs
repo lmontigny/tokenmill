@@ -105,6 +105,35 @@ fn b200_is_faster_than_h100_for_fp8() {
 }
 
 #[test]
+fn mi300x_beats_h100_on_decode_despite_lower_mfu() {
+    // MI300X: 5.3 TB/s × 0.72 MFU = 3.82 TB/s effective. H100: 3.35 × 0.80 = 2.68. ~1.4× faster.
+    let h100 = GpuSpec::preset("h100").unwrap();
+    let mi300x = GpuSpec::preset("mi300x").unwrap();
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let h100_ms = h100.decode_latency(1, 256, &model, None, &c);
+    let mi300x_ms = mi300x.decode_latency(1, 256, &model, None, &c);
+
+    let speedup = h100_ms / mi300x_ms;
+    assert!(
+        speedup > 1.3 && speedup < 1.6,
+        "MI300X vs H100 decode: expected 1.3-1.6× speedup, got {:.2}×",
+        speedup
+    );
+}
+
+#[test]
+fn mi355x_has_fp8_tensor_cores() {
+    let mi355x = GpuSpec::preset("mi355x").unwrap();
+    assert!(mi355x.flops_fp8 > 0.0);
+    assert!(
+        mi355x.flops_fp8 > mi355x.flops_bf16,
+        "FP8 should be at least 2× BF16"
+    );
+}
+
+#[test]
 fn a100_has_no_fp8_tensor_cores() {
     // A100 preset sets flops_fp8 = 0; FP8 model should fall back to bf16 path.
     let a100 = GpuSpec::preset("a100").unwrap();
