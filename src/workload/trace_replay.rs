@@ -23,16 +23,17 @@ fn gregorian_to_jdn(year: i32, month: i32, day: i32) -> i32 {
 /// Parse Azure trace timestamp "2023-11-16 18:17:03.9799600" → seconds (arbitrary epoch).
 /// The absolute value doesn't matter; the caller subtracts the base of the first record.
 fn parse_iso_datetime(s: &str) -> Result<f64, Box<dyn std::error::Error>> {
-    let (date, time) = s.split_once(' ')
+    let (date, time) = s
+        .split_once(' ')
         .ok_or_else(|| format!("expected 'YYYY-MM-DD HH:MM:SS' but got '{}'", s))?;
 
     let mut dp = date.split('-');
-    let year: i32  = dp.next().ok_or("missing year")?.trim().parse()?;
+    let year: i32 = dp.next().ok_or("missing year")?.trim().parse()?;
     let month: i32 = dp.next().ok_or("missing month")?.trim().parse()?;
-    let day: i32   = dp.next().ok_or("missing day")?.trim().parse()?;
+    let day: i32 = dp.next().ok_or("missing day")?.trim().parse()?;
 
     let mut tp = time.splitn(3, ':');
-    let h: f64  = tp.next().ok_or("missing hour")?.trim().parse()?;
+    let h: f64 = tp.next().ok_or("missing hour")?.trim().parse()?;
     let mi: f64 = tp.next().ok_or("missing minute")?.trim().parse()?;
     let sec: f64 = tp.next().ok_or("missing second")?.trim().parse()?;
 
@@ -76,7 +77,9 @@ impl TraceReplay {
             let raw_time = if is_azure {
                 parse_iso_datetime(rec.get(0).ok_or("missing TIMESTAMP column")?)?
             } else {
-                rec.get(0).ok_or("missing timestamp_ms column")?.parse::<f64>()?
+                rec.get(0)
+                    .ok_or("missing timestamp_ms column")?
+                    .parse::<f64>()?
             };
             let prompt: u32 = rec.get(1).ok_or("missing prompt/context column")?.parse()?;
             let output: u32 = rec.get(2).ok_or("missing output column")?.parse()?;
@@ -93,9 +96,9 @@ impl TraceReplay {
             .map(|(i, (raw_time, prompt, output))| {
                 // Convert to seconds relative to first record.
                 let t = if is_azure {
-                    raw_time - base              // Azure: already in seconds
+                    raw_time - base // Azure: already in seconds
                 } else {
-                    (raw_time - base) / 1000.0   // native: milliseconds → seconds
+                    (raw_time - base) / 1000.0 // native: milliseconds → seconds
                 };
                 let req = InferenceRequest {
                     req_id: i as u64,
@@ -112,6 +115,10 @@ impl TraceReplay {
 
     pub fn len(&self) -> usize {
         self.records.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.records.is_empty()
     }
 }
 
@@ -164,10 +171,18 @@ mod tests {
         assert_eq!(r0.prompt_tokens, 512);
         // Second record: 18:17:04.031960 - 18:17:03.979960 = 0.052000 s
         let (t1, _) = replay.next_arrival().unwrap();
-        assert!((t1 - 0.052).abs() < 1e-4, "gap should be ~52 ms, got {}", t1);
+        assert!(
+            (t1 - 0.052).abs() < 1e-4,
+            "gap should be ~52 ms, got {}",
+            t1
+        );
         // Third record: 18:17:05.000000 - 18:17:03.979960 = 1.020040 s
         let (t2, _) = replay.next_arrival().unwrap();
-        assert!((t2 - 1.02004).abs() < 1e-4, "gap should be ~1.020 s, got {}", t2);
+        assert!(
+            (t2 - 1.02004).abs() < 1e-4,
+            "gap should be ~1.020 s, got {}",
+            t2
+        );
     }
 
     #[test]
@@ -182,6 +197,10 @@ mod tests {
         let (t0, _) = replay.next_arrival().unwrap();
         let (t1, _) = replay.next_arrival().unwrap();
         assert!(t1 > t0, "Dec 1 should be after Nov 30");
-        assert!((t1 - t0 - 2.0).abs() < 1e-4, "gap should be 2 s, got {}", t1 - t0);
+        assert!(
+            (t1 - t0 - 2.0).abs() < 1e-4,
+            "gap should be 2 s, got {}",
+            t1 - t0
+        );
     }
 }

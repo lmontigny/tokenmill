@@ -16,7 +16,10 @@ pub struct ChunkedPrefillScheduler {
 
 impl ChunkedPrefillScheduler {
     pub fn new(chunk_size: u32, max_batch_tokens: u32) -> Self {
-        Self { chunk_size, max_batch_tokens }
+        Self {
+            chunk_size,
+            max_batch_tokens,
+        }
     }
 
     pub fn schedule(
@@ -29,11 +32,15 @@ impl ChunkedPrefillScheduler {
     ) -> ChunkedBatchDecision {
         // Preempt largest decode request when KV is fully exhausted.
         if kv_free_blocks == 0 && !waiting.is_empty() {
-            if let Some(victim) = running.iter()
+            if let Some(victim) = running
+                .iter()
                 .filter(|s| matches!(s.phase, RequestPhase::Decoding))
                 .max_by_key(|s| s.req.prompt_tokens + s.req.max_output_tokens)
             {
-                return ChunkedBatchDecision { admit: vec![], preempt: vec![victim.req.req_id] };
+                return ChunkedBatchDecision {
+                    admit: vec![],
+                    preempt: vec![victim.req.req_id],
+                };
             }
         }
 
@@ -60,6 +67,9 @@ impl ChunkedPrefillScheduler {
             kv_budget -= kv_needed;
         }
 
-        ChunkedBatchDecision { admit, preempt: Vec::new() }
+        ChunkedBatchDecision {
+            admit,
+            preempt: Vec::new(),
+        }
     }
 }

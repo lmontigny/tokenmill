@@ -96,6 +96,7 @@ pub struct Simulator {
 }
 
 impl Simulator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         prefill_gpu: GpuState,
         decode_gpu: Option<GpuState>,
@@ -153,9 +154,11 @@ impl Simulator {
             self.clock = event.time;
             let new_events = match event.payload {
                 EventPayload::RequestArrival { req } => self.handle_arrival(req),
-                EventPayload::PrefillStart { req_id, gpu_id, chunk_tokens } => {
-                    self.handle_prefill_start(req_id, gpu_id, chunk_tokens)
-                }
+                EventPayload::PrefillStart {
+                    req_id,
+                    gpu_id,
+                    chunk_tokens,
+                } => self.handle_prefill_start(req_id, gpu_id, chunk_tokens),
                 EventPayload::PrefillDone { req_id, gpu_id } => {
                     self.handle_prefill_done(req_id, gpu_id)
                 }
@@ -179,11 +182,17 @@ impl Simulator {
     // ── GPU helpers ──────────────────────────────────────────────────────────
 
     fn decode_gpu_id(&self) -> u32 {
-        self.decode_gpu.as_ref().map(|g| g.id).unwrap_or(self.prefill_gpu.id)
+        self.decode_gpu
+            .as_ref()
+            .map(|g| g.id)
+            .unwrap_or(self.prefill_gpu.id)
     }
 
     fn decode_gpu_busy_until(&self) -> SimTime {
-        self.decode_gpu.as_ref().map(|g| g.busy_until).unwrap_or(self.prefill_gpu.busy_until)
+        self.decode_gpu
+            .as_ref()
+            .map(|g| g.busy_until)
+            .unwrap_or(self.prefill_gpu.busy_until)
     }
 
     fn set_decode_gpu_busy(&mut self, until: SimTime) {
@@ -203,7 +212,9 @@ impl Simulator {
 
     fn handle_scheduler_tick(&mut self) -> Vec<(SimTime, EventPayload)> {
         let mut new_events = Vec::new();
-        let running: Vec<RequestState> = self.prefilling.values()
+        let running: Vec<RequestState> = self
+            .prefilling
+            .values()
             .chain(self.transferring.values())
             .chain(self.decoding.values().map(|(s, _)| s))
             .cloned()
@@ -212,8 +223,16 @@ impl Simulator {
         match &self.scheduler {
             SchedulerKind::Continuous(_) => {
                 let decision = if let SchedulerKind::Continuous(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock)
-                } else { unreachable!() };
+                    s.schedule(
+                        &self.waiting,
+                        &running,
+                        self.kv.free_blocks,
+                        self.kv.block_size,
+                        self.clock,
+                    )
+                } else {
+                    unreachable!()
+                };
                 let had_preemptions = !decision.preempt.is_empty();
                 for req_id in decision.preempt {
                     self.handle_preemption(req_id);
@@ -228,8 +247,16 @@ impl Simulator {
             }
             SchedulerKind::Chunked(_) => {
                 let decision = if let SchedulerKind::Chunked(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock)
-                } else { unreachable!() };
+                    s.schedule(
+                        &self.waiting,
+                        &running,
+                        self.kv.free_blocks,
+                        self.kv.block_size,
+                        self.clock,
+                    )
+                } else {
+                    unreachable!()
+                };
                 let had_preemptions = !decision.preempt.is_empty();
                 for req_id in decision.preempt {
                     self.handle_preemption(req_id);
@@ -286,25 +313,40 @@ impl Simulator {
         self.prefill_progress.insert(req_id, 0);
         self.metrics.record_kv_util(self.kv.utilization());
 
-        vec![(self.clock, EventPayload::PrefillStart {
-            req_id, gpu_id: self.prefill_gpu.id, chunk_tokens,
-        })]
+        vec![(
+            self.clock,
+            EventPayload::PrefillStart {
+                req_id,
+                gpu_id: self.prefill_gpu.id,
+                chunk_tokens,
+            },
+        )]
     }
 
     fn handle_prefill_start(
-        &mut self, req_id: u64, gpu_id: u32, chunk_tokens: u32,
+        &mut self,
+        req_id: u64,
+        gpu_id: u32,
+        chunk_tokens: u32,
     ) -> Vec<(SimTime, EventPayload)> {
         *self.prefill_progress.entry(req_id).or_insert(0) += chunk_tokens;
         let start = self.prefill_gpu.busy_until.max(self.clock);
         let kt = self.prefill_gpu.kernel_table.as_ref();
-        let latency = self.prefill_gpu.spec.prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
+        let latency =
+            self.prefill_gpu
+                .spec
+                .prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
         let done_time = start + latency;
         self.prefill_gpu.busy_until = done_time;
         vec![(done_time, EventPayload::PrefillDone { req_id, gpu_id })]
     }
 
     fn handle_prefill_done(&mut self, req_id: u64, _gpu_id: u32) -> Vec<(SimTime, EventPayload)> {
-        let total_prompt = self.prefilling.get(&req_id).map(|s| s.req.prompt_tokens).unwrap_or(0);
+        let total_prompt = self
+            .prefilling
+            .get(&req_id)
+            .map(|s| s.req.prompt_tokens)
+            .unwrap_or(0);
         let done_so_far = self.prefill_progress.get(&req_id).copied().unwrap_or(0);
         let remaining = total_prompt.saturating_sub(done_so_far);
 
@@ -314,9 +356,14 @@ impl Simulator {
                 _ => remaining,
             };
             *self.prefill_progress.entry(req_id).or_insert(0) += chunk;
-            return vec![(self.clock, EventPayload::PrefillStart {
-                req_id, gpu_id: self.prefill_gpu.id, chunk_tokens: chunk,
-            })];
+            return vec![(
+                self.clock,
+                EventPayload::PrefillStart {
+                    req_id,
+                    gpu_id: self.prefill_gpu.id,
+                    chunk_tokens: chunk,
+                },
+            )];
         }
 
         // Prefill complete — record prefill latency.
@@ -360,7 +407,12 @@ impl Simulator {
         // Kick off (or join) the decode batch at the transfer completion time.
         if !self.decode_scheduled {
             self.decode_scheduled = true;
-            return vec![(done_time, EventPayload::BatchDecodeStep { gpu_id: self.decode_gpu_id() })];
+            return vec![(
+                done_time,
+                EventPayload::BatchDecodeStep {
+                    gpu_id: self.decode_gpu_id(),
+                },
+            )];
         }
         vec![]
     }
@@ -372,7 +424,12 @@ impl Simulator {
         }
         if !self.decode_scheduled {
             self.decode_scheduled = true;
-            return vec![(self.clock, EventPayload::BatchDecodeStep { gpu_id: self.decode_gpu_id() })];
+            return vec![(
+                self.clock,
+                EventPayload::BatchDecodeStep {
+                    gpu_id: self.decode_gpu_id(),
+                },
+            )];
         }
         vec![]
     }
@@ -384,23 +441,38 @@ impl Simulator {
 
         let batch_size = self.decoding.len() as u32;
         let avg_kv_len = {
-            let total: u32 = self.decoding.values().map(|(s, step)| s.req.prompt_tokens + step).sum();
+            let total: u32 = self
+                .decoding
+                .values()
+                .map(|(s, step)| s.req.prompt_tokens + step)
+                .sum();
             total / batch_size.max(1)
         };
 
         // Use decode GPU spec and kernel table (may differ from prefill GPU in disagg mode).
-        let decode_spec = self.decode_gpu.as_ref()
+        let decode_spec = self
+            .decode_gpu
+            .as_ref()
             .map(|g| &g.spec)
             .unwrap_or(&self.prefill_gpu.spec);
-        let kt = self.decode_gpu.as_ref()
+        let kt = self
+            .decode_gpu
+            .as_ref()
             .and_then(|g| g.kernel_table.as_ref())
-            .or_else(|| self.prefill_gpu.kernel_table.as_ref());
+            .or(self.prefill_gpu.kernel_table.as_ref());
 
-        let base_lat = decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
+        let base_lat =
+            decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
         let (latency, tokens_per_step) = if let Some(ref spec) = self.spec {
             // Speculative decode: K serial draft steps + one main-model verify pass.
             let draft_lat = spec.draft_tokens as f64
-                * decode_spec.decode_latency(batch_size, avg_kv_len, &spec.draft_model, None, &self.cluster);
+                * decode_spec.decode_latency(
+                    batch_size,
+                    avg_kv_len,
+                    &spec.draft_model,
+                    None,
+                    &self.cluster,
+                );
             (draft_lat + base_lat, spec.tokens_per_step())
         } else if let Some(ref mtp) = self.mtp {
             // MTP: single forward pass + K lightweight heads (≈1 layer each).
@@ -422,7 +494,11 @@ impl Simulator {
         let mut first_token_ids = Vec::new(); // requests getting their very first token this step
 
         for req_id in req_ids {
-            let max_steps = self.decoding.get(&req_id).map(|(s, _)| s.req.max_output_tokens).unwrap_or(0);
+            let max_steps = self
+                .decoding
+                .get(&req_id)
+                .map(|(s, _)| s.req.max_output_tokens)
+                .unwrap_or(0);
             if let Some((_, step)) = self.decoding.get_mut(&req_id) {
                 if *step == 0 {
                     first_token_ids.push(req_id);

@@ -33,7 +33,14 @@ pub struct ClusterConfig {
 
 impl ClusterConfig {
     pub fn single_gpu() -> Self {
-        Self { tp: 1, pp: 1, ep: 1, nvlink_bw: 0.0, internode_bw: 0.0, disaggregate: false }
+        Self {
+            tp: 1,
+            pp: 1,
+            ep: 1,
+            nvlink_bw: 0.0,
+            internode_bw: 0.0,
+            disaggregate: false,
+        }
     }
 
     /// KV transfer latency from prefill node to decode node (seconds).
@@ -58,8 +65,14 @@ impl ClusterConfig {
         if self.pp <= 1 {
             return 0.0;
         }
-        let bw = if intranode { self.nvlink_bw } else { self.internode_bw };
-        if bw <= 0.0 { return 0.0; }
+        let bw = if intranode {
+            self.nvlink_bw
+        } else {
+            self.internode_bw
+        };
+        if bw <= 0.0 {
+            return 0.0;
+        }
         activation_bytes as f64 / bw
     }
 

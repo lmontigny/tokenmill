@@ -8,10 +8,11 @@ use super::kernel_table::{KernelOp, KernelTable};
 #[derive(Debug, Clone, Deserialize)]
 pub struct GpuSpec {
     pub name: String,
-    pub flops_bf16: f64,       // peak BF16 FLOPS (e.g. 989e12 for H100)
-    #[serde(default)] pub flops_fp8: f64, // peak FP8 FLOPS (e.g. 1978e12 for H100; 0 = same as bf16)
-    pub hbm_bandwidth: f64,    // bytes/sec (e.g. 3.35e12 for H100)
-    pub hbm_capacity: u64,     // bytes
+    pub flops_bf16: f64, // peak BF16 FLOPS (e.g. 989e12 for H100)
+    #[serde(default)]
+    pub flops_fp8: f64, // peak FP8 FLOPS (e.g. 1978e12 for H100; 0 = same as bf16)
+    pub hbm_bandwidth: f64, // bytes/sec (e.g. 3.35e12 for H100)
+    pub hbm_capacity: u64, // bytes
     pub nvlink_bandwidth: f64, // bytes/sec per direction
     pub mfu_prefill: f64,
     pub mfu_decode: f64,
@@ -35,15 +36,19 @@ impl GpuSpec {
         let pp = cluster.pp.max(1);
 
         // Per-TP-group latency: kernel table gives single-GPU numbers (÷TP); roofline has TP+EP baked in.
-        let tp_group_lat = match ktable.and_then(|kt| kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Prefill, batch, seq_len)) {
+        let tp_group_lat = match ktable.and_then(|kt| {
+            kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Prefill, batch, seq_len)
+        }) {
             Some(single_gpu_lat) => single_gpu_lat / tp as f64,
             None => self.roofline_prefill(batch, seq_len, model, tp, cluster.ep),
         };
 
-        let ar_msg = batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let ar_msg =
+            batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let ar_cost = model.n_layers as f64 * 2.0 * cluster.all_reduce_latency(ar_msg);
 
-        let act_bytes = batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let act_bytes =
+            batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
         let pp_cost = (pp - 1) as f64 * cluster.pp_transfer_latency(act_bytes, true);
 
         // EP all-to-all: 2 per MoE layer. Each token dispatches to top_K experts → multiply by top_K.
@@ -52,7 +57,11 @@ impl GpuSpec {
             let top_k = (model.n_active_experts + model.n_shared_experts).max(1) as u64;
             model.n_moe_layers as f64
                 * 2.0
-                * cluster.ep_all_to_all_latency(batch_tokens * top_k, model.d_model, model.dtype_bytes)
+                * cluster.ep_all_to_all_latency(
+                    batch_tokens * top_k,
+                    model.d_model,
+                    model.dtype_bytes,
+                )
         } else {
             0.0
         };
@@ -76,7 +85,9 @@ impl GpuSpec {
         let tp = cluster.tp.max(1);
         let pp = cluster.pp.max(1);
 
-        let tp_group_lat = match ktable.and_then(|kt| kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Decode, batch, avg_kv_len)) {
+        let tp_group_lat = match ktable.and_then(|kt| {
+            kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Decode, batch, avg_kv_len)
+        }) {
             Some(single_gpu_lat) => single_gpu_lat / tp as f64,
             None => self.roofline_decode(batch, avg_kv_len, model, tp, cluster.ep),
         };
@@ -91,7 +102,11 @@ impl GpuSpec {
             let top_k = (model.n_active_experts + model.n_shared_experts).max(1) as u64;
             model.n_moe_layers as f64
                 * 2.0
-                * cluster.ep_all_to_all_latency(batch as u64 * top_k, model.d_model, model.dtype_bytes)
+                * cluster.ep_all_to_all_latency(
+                    batch as u64 * top_k,
+                    model.d_model,
+                    model.dtype_bytes,
+                )
         } else {
             0.0
         };
@@ -102,24 +117,47 @@ impl GpuSpec {
     /// Prefill roofline: 2 × batch × seq × active_params FLOPs.
     /// With EP: expert FLOPs split by EP; attention/dense FLOPs split by TP.
     /// Returns per-TP-group latency (already accounts for parallelism).
-    fn roofline_prefill(&self, batch: u32, seq_len: u32, model: &LlmConfig, tp: u32, ep: u32) -> f64 {
+    fn roofline_prefill(
+        &self,
+        batch: u32,
+        seq_len: u32,
+        model: &LlmConfig,
+        tp: u32,
+        ep: u32,
+    ) -> f64 {
         let tokens = batch as f64 * seq_len as f64;
         let flops = if ep > 1 && model.is_moe() {
-            let expert_params = model.expert_weight_bytes_active() as f64 / model.dtype_bytes as f64;
-            let other_params = model.weight_bytes_active().saturating_sub(model.expert_weight_bytes_active()) as f64 / model.dtype_bytes as f64;
+            let expert_params =
+                model.expert_weight_bytes_active() as f64 / model.dtype_bytes as f64;
+            let other_params = model
+                .weight_bytes_active()
+                .saturating_sub(model.expert_weight_bytes_active())
+                as f64
+                / model.dtype_bytes as f64;
             2.0 * tokens * (other_params / tp as f64 + expert_params / ep as f64)
         } else {
             let active_params = model.weight_bytes_active() as f64 / model.dtype_bytes as f64;
             2.0 * tokens * active_params / tp as f64
         };
-        let peak_flops = if model.dtype_bytes == 1 && self.flops_fp8 > 0.0 { self.flops_fp8 } else { self.flops_bf16 };
+        let peak_flops = if model.dtype_bytes == 1 && self.flops_fp8 > 0.0 {
+            self.flops_fp8
+        } else {
+            self.flops_bf16
+        };
         flops / (peak_flops * self.mfu_prefill)
     }
 
     /// Decode roofline: memory-BW bound — load active weights + KV per request.
     /// With EP: expert weights split by EP; attention weights and KV split by TP.
     /// Returns per-TP-group latency (already accounts for parallelism).
-    fn roofline_decode(&self, batch: u32, avg_kv_len: u32, model: &LlmConfig, tp: u32, ep: u32) -> f64 {
+    fn roofline_decode(
+        &self,
+        batch: u32,
+        avg_kv_len: u32,
+        model: &LlmConfig,
+        tp: u32,
+        ep: u32,
+    ) -> f64 {
         let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
         let bytes_per_gpu = if ep > 1 && model.is_moe() {
             let expert_bytes = model.expert_weight_bytes_active();
@@ -137,13 +175,13 @@ impl GpuSpec {
             // NVIDIA Blackwell B200 SXM (NVL72/HGX). FP4 not modeled — listed for reference: 9000 TFLOPS dense.
             "b200" => Some(Self {
                 name: "B200-SXM".into(),
-                flops_bf16: 2250e12,    // 2.25 PFLOPS dense BF16/FP16
-                flops_fp8:  4500e12,    // 4.5 PFLOPS dense FP8 (2× H100)
-                hbm_bandwidth: 8.0e12,  // 8 TB/s HBM3e (2.4× H100)
+                flops_bf16: 2250e12,           // 2.25 PFLOPS dense BF16/FP16
+                flops_fp8: 4500e12,            // 4.5 PFLOPS dense FP8 (2× H100)
+                hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e (2.4× H100)
                 hbm_capacity: 192_000_000_000, // 192 GB HBM3e
                 nvlink_bandwidth: 1800e9,      // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
                 mfu_prefill: 0.70, // slightly lower than H100 — new gen, real-world kernels less mature
-                mfu_decode:  0.75,
+                mfu_decode: 0.75,
             }),
             "h100" => Some(Self {
                 name: "H100-SXM5".into(),
@@ -189,7 +227,12 @@ pub struct GpuState {
 
 impl GpuState {
     pub fn new(id: u32, spec: GpuSpec) -> Self {
-        Self { id, spec, busy_until: 0.0, kernel_table: None }
+        Self {
+            id,
+            spec,
+            busy_until: 0.0,
+            kernel_table: None,
+        }
     }
 
     pub fn with_kernel_table(mut self, kt: KernelTable) -> Self {

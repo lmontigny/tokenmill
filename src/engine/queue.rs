@@ -7,9 +7,18 @@ pub struct SimQueue {
     next_seq: u64,
 }
 
+impl Default for SimQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimQueue {
     pub fn new() -> Self {
-        Self { heap: BinaryHeap::new(), next_seq: 0 }
+        Self {
+            heap: BinaryHeap::new(),
+            next_seq: 0,
+        }
     }
 
     pub fn push(&mut self, time: SimTime, payload: EventPayload) {

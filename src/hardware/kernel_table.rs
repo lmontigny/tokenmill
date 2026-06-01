@@ -65,7 +65,14 @@ impl KernelTable {
         for result in rdr.deserialize() {
             let rec: CsvRecord = result?;
             if let Some(op) = KernelOp::from_str(&rec.op) {
-                table.insert(&rec.gpu, &rec.model, op, rec.batch_size, rec.seq_len, rec.latency_ms / 1000.0);
+                table.insert(
+                    &rec.gpu,
+                    &rec.model,
+                    op,
+                    rec.batch_size,
+                    rec.seq_len,
+                    rec.latency_ms / 1000.0,
+                );
             }
         }
         // Sort each interpolation vec by seq_len
@@ -76,31 +83,71 @@ impl KernelTable {
     }
 
     fn empty() -> Self {
-        Self { exact: FxHashMap::default(), by_seq: FxHashMap::default() }
+        Self {
+            exact: FxHashMap::default(),
+            by_seq: FxHashMap::default(),
+        }
     }
 
-    fn insert(&mut self, gpu: &str, model: &str, op: KernelOp, batch: u32, seq_len: u32, latency_s: f64) {
+    fn insert(
+        &mut self,
+        gpu: &str,
+        model: &str,
+        op: KernelOp,
+        batch: u32,
+        seq_len: u32,
+        latency_s: f64,
+    ) {
         self.exact.insert(
-            KernelKey { gpu: gpu.into(), model: model.into(), op, batch, seq_len },
+            KernelKey {
+                gpu: gpu.into(),
+                model: model.into(),
+                op,
+                batch,
+                seq_len,
+            },
             latency_s,
         );
         self.by_seq
-            .entry(PartialKey { gpu: gpu.into(), model: model.into(), op, batch })
+            .entry(PartialKey {
+                gpu: gpu.into(),
+                model: model.into(),
+                op,
+                batch,
+            })
             .or_default()
             .push((seq_len, latency_s));
     }
 
     /// Returns profiled latency in seconds, or None if no data for this gpu+model+op+batch combo.
     /// Uses exact match first, then linear interpolation on seq_len.
-    pub fn lookup(&self, gpu: &str, model: &str, op: KernelOp, batch: u32, seq_len: u32) -> Option<f64> {
+    pub fn lookup(
+        &self,
+        gpu: &str,
+        model: &str,
+        op: KernelOp,
+        batch: u32,
+        seq_len: u32,
+    ) -> Option<f64> {
         // Exact hit
-        let key = KernelKey { gpu: gpu.into(), model: model.into(), op, batch, seq_len };
+        let key = KernelKey {
+            gpu: gpu.into(),
+            model: model.into(),
+            op,
+            batch,
+            seq_len,
+        };
         if let Some(&v) = self.exact.get(&key) {
             return Some(v);
         }
 
         // Interpolate: find the two bracketing seq_len entries
-        let pkey = PartialKey { gpu: gpu.into(), model: model.into(), op, batch };
+        let pkey = PartialKey {
+            gpu: gpu.into(),
+            model: model.into(),
+            op,
+            batch,
+        };
         let entries = self.by_seq.get(&pkey)?;
         if entries.is_empty() {
             return None;
@@ -126,14 +173,23 @@ impl KernelTable {
 
     /// Find nearest batch size with data, then interpolate on seq_len.
     /// Used when the exact batch size isn't in the table.
-    pub fn lookup_nearest_batch(&self, gpu: &str, model: &str, op: KernelOp, batch: u32, seq_len: u32) -> Option<f64> {
+    pub fn lookup_nearest_batch(
+        &self,
+        gpu: &str,
+        model: &str,
+        op: KernelOp,
+        batch: u32,
+        seq_len: u32,
+    ) -> Option<f64> {
         // Try exact batch first
         if let Some(v) = self.lookup(gpu, model, op, batch, seq_len) {
             return Some(v);
         }
 
         // Find all batch sizes available for this gpu/model/op
-        let available_batches: Vec<u32> = self.by_seq.keys()
+        let available_batches: Vec<u32> = self
+            .by_seq
+            .keys()
             .filter(|k| k.gpu == gpu && k.model == model && k.op == op)
             .map(|k| k.batch)
             .collect();
@@ -143,7 +199,9 @@ impl KernelTable {
         }
 
         // Pick the nearest batch size
-        let nearest = *available_batches.iter().min_by_key(|&&b| b.abs_diff(batch))?;
+        let nearest = *available_batches
+            .iter()
+            .min_by_key(|&&b| b.abs_diff(batch))?;
         self.lookup(gpu, model, op, nearest, seq_len)
     }
 }
@@ -167,20 +225,30 @@ mod tests {
     #[test]
     fn exact_lookup() {
         let t = make_table();
-        assert!((t.lookup("H100", "llama-8b", KernelOp::Prefill, 1, 128).unwrap() - 0.001).abs() < 1e-9);
+        assert!(
+            (t.lookup("H100", "llama-8b", KernelOp::Prefill, 1, 128)
+                .unwrap()
+                - 0.001)
+                .abs()
+                < 1e-9
+        );
     }
 
     #[test]
     fn interpolated_lookup() {
         let t = make_table();
         // seq=320 is halfway between 128 and 512 → latency should be between 1ms and 4ms
-        let v = t.lookup("H100", "llama-8b", KernelOp::Prefill, 1, 320).unwrap();
+        let v = t
+            .lookup("H100", "llama-8b", KernelOp::Prefill, 1, 320)
+            .unwrap();
         assert!(v > 0.001 && v < 0.004);
     }
 
     #[test]
     fn missing_returns_none() {
         let t = make_table();
-        assert!(t.lookup("A100", "llama-8b", KernelOp::Prefill, 1, 128).is_none());
+        assert!(t
+            .lookup("A100", "llama-8b", KernelOp::Prefill, 1, 128)
+            .is_none());
     }
 }

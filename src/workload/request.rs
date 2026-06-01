@@ -24,8 +24,8 @@ pub struct RequestState {
     pub req: InferenceRequest,
     pub phase: RequestPhase,
     pub start_time: Option<SimTime>,
-    pub prefill_done_time: Option<SimTime>,  // when prefill completed
-    pub first_token_time: Option<SimTime>,   // when first decode token was produced (true TTFT)
+    pub prefill_done_time: Option<SimTime>, // when prefill completed
+    pub first_token_time: Option<SimTime>,  // when first decode token was produced (true TTFT)
     pub completion_time: Option<SimTime>,
     pub gpu_id: Option<u32>,
 }
@@ -65,7 +65,11 @@ impl RequestState {
         match (self.first_token_time, self.completion_time) {
             (Some(first), Some(done)) => {
                 let steps = self.req.max_output_tokens.saturating_sub(1) as f64;
-                if steps > 0.0 { Some((done - first) / steps) } else { None }
+                if steps > 0.0 {
+                    Some((done - first) / steps)
+                } else {
+                    None
+                }
             }
             _ => None,
         }

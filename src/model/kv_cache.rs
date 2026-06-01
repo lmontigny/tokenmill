@@ -18,7 +18,7 @@ impl std::fmt::Display for KvError {
 }
 
 pub struct KvCacheManager {
-    pub block_size: u32,    // tokens per block
+    pub block_size: u32, // tokens per block
     pub total_blocks: u32,
     pub free_blocks: u32,
     allocated: FxHashMap<u64, u32>, // req_id → blocks currently held
@@ -38,7 +38,10 @@ impl KvCacheManager {
     pub fn allocate(&mut self, req_id: u64, n_tokens: u32) -> Result<(), KvError> {
         let n_blocks = n_tokens.div_ceil(self.block_size);
         if n_blocks > self.free_blocks {
-            return Err(KvError::OutOfMemory { needed: n_blocks, free: self.free_blocks });
+            return Err(KvError::OutOfMemory {
+                needed: n_blocks,
+                free: self.free_blocks,
+            });
         }
         *self.allocated.entry(req_id).or_insert(0) += n_blocks;
         self.free_blocks -= n_blocks;
@@ -53,7 +56,10 @@ impl KvCacheManager {
         let current_blocks = self.allocated.get(&req_id).copied().unwrap_or(0);
         let extra = new_blocks_needed.saturating_sub(current_blocks);
         if extra > self.free_blocks {
-            return Err(KvError::OutOfMemory { needed: extra, free: self.free_blocks });
+            return Err(KvError::OutOfMemory {
+                needed: extra,
+                free: self.free_blocks,
+            });
         }
         *self.allocated.entry(req_id).or_insert(0) += extra;
         self.free_blocks -= extra;

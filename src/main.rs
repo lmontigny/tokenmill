@@ -1,29 +1,25 @@
-mod engine;
-mod hardware;
-mod metrics;
-mod model;
-mod scheduler;
-mod workload;
-
 use std::path::Path;
 
 use clap::Parser;
 use rayon::prelude::*;
 
-use engine::sim::{Simulator, SchedulerKind, MtpConfig, SpecConfig};
-use hardware::cluster::ClusterConfig;
-use hardware::gpu::{GpuSpec, GpuState};
-use hardware::kernel_table::KernelTable;
-use metrics::report::RunSummary;
-use model::kv_cache::KvCacheManager;
-use model::llm_config::LlmConfig;
-use scheduler::chunked_prefill::ChunkedPrefillScheduler;
-use scheduler::continuous_batch::ContinuousBatchScheduler;
-use workload::synthetic::SyntheticWorkload;
-use workload::trace_replay::TraceReplay;
+use inference_sim::engine::sim::{MtpConfig, SchedulerKind, Simulator, SpecConfig};
+use inference_sim::hardware::cluster::ClusterConfig;
+use inference_sim::hardware::gpu::{GpuSpec, GpuState};
+use inference_sim::hardware::kernel_table::KernelTable;
+use inference_sim::metrics::report::RunSummary;
+use inference_sim::model::kv_cache::KvCacheManager;
+use inference_sim::model::llm_config::LlmConfig;
+use inference_sim::scheduler::chunked_prefill::ChunkedPrefillScheduler;
+use inference_sim::scheduler::continuous_batch::ContinuousBatchScheduler;
+use inference_sim::workload::synthetic::SyntheticWorkload;
+use inference_sim::workload::trace_replay::TraceReplay;
 
 #[derive(Parser, Debug, Clone)]
-#[command(name = "inference-sim", about = "LLM inference discrete-event simulator")]
+#[command(
+    name = "inference-sim",
+    about = "LLM inference discrete-event simulator"
+)]
 struct Args {
     /// GPU preset: h100 | a100 | a10g
     #[arg(long, default_value = "h100")]
@@ -140,7 +136,10 @@ struct Args {
 fn load_kernel_table(path: &str) -> Option<KernelTable> {
     match KernelTable::from_csv(Path::new(path)) {
         Ok(kt) => Some(kt),
-        Err(e) => { eprintln!("Warning: could not load kernel table '{}': {}", path, e); None }
+        Err(e) => {
+            eprintln!("Warning: could not load kernel table '{}': {}", path, e);
+            None
+        }
     }
 }
 
@@ -149,7 +148,13 @@ fn load_kernel_table(path: &str) -> Option<KernelTable> {
 /// With TP/PP, each GPU holds 1/(tp×pp) of the model weights and 1/(tp×pp) of
 /// the KV per token (KV heads sharded by TP, KV layers sharded by PP).
 /// Total logical blocks = (tp×pp × available_per_gpu) / bytes_per_block.
-fn auto_kv_blocks(gpu_spec: &GpuSpec, model: &LlmConfig, kv_block_size: u32, tp: u32, pp: u32) -> u32 {
+fn auto_kv_blocks(
+    gpu_spec: &GpuSpec,
+    model: &LlmConfig,
+    kv_block_size: u32,
+    tp: u32,
+    pp: u32,
+) -> u32 {
     let n_gpus = (tp * pp).max(1) as u64;
     let weight_per_gpu = model.weight_bytes / n_gpus;
     let hbm = gpu_spec.hbm_capacity as f64;
@@ -165,26 +170,38 @@ fn auto_kv_blocks(gpu_spec: &GpuSpec, model: &LlmConfig, kv_block_size: u32, tp:
 
 fn fmt_bytes(bytes: u64) -> String {
     let gb = bytes as f64 / 1e9;
-    if gb >= 1.0 { format!("{:.1} GB", gb) } else { format!("{:.0} MB", bytes as f64 / 1e6) }
+    if gb >= 1.0 {
+        format!("{:.1} GB", gb)
+    } else {
+        format!("{:.0} MB", bytes as f64 / 1e6)
+    }
 }
 
 fn fmt_params(bytes: u64, dtype_bytes: u32) -> String {
     let params = bytes as f64 / dtype_bytes as f64;
-    if params >= 1e12 { format!("{:.1} T", params / 1e12) }
-    else if params >= 1e9 { format!("{:.0} B", params / 1e9) }
-    else { format!("{:.0} M", params / 1e6) }
+    if params >= 1e12 {
+        format!("{:.1} T", params / 1e12)
+    } else if params >= 1e9 {
+        format!("{:.0} B", params / 1e9)
+    } else {
+        format!("{:.0} M", params / 1e6)
+    }
 }
 
 fn dtype_label(bytes: u32) -> &'static str {
-    match bytes { 1 => "fp8", 2 => "bf16/fp16", 4 => "fp32", _ => "?" }
+    match bytes {
+        1 => "fp8",
+        2 => "bf16/fp16",
+        4 => "fp32",
+        _ => "?",
+    }
 }
 
 /// Print a model/cluster info card before running the simulation.
 fn print_model_card(args: &Args) {
-    let gpu = GpuSpec::preset(&args.gpu)
-        .unwrap_or_else(|| panic!("Unknown GPU '{}'", args.gpu));
-    let model = LlmConfig::preset(&args.model)
-        .unwrap_or_else(|| panic!("Unknown model '{}'", args.model));
+    let gpu = GpuSpec::preset(&args.gpu).unwrap_or_else(|| panic!("Unknown GPU '{}'", args.gpu));
+    let model =
+        LlmConfig::preset(&args.model).unwrap_or_else(|| panic!("Unknown model '{}'", args.model));
 
     let n_gpus = (args.tp * args.pp).max(1) as u64;
     let weight_per_gpu = model.weight_bytes / n_gpus;
@@ -207,21 +224,39 @@ fn print_model_card(args: &Args) {
         let active_params = fmt_params(model.weight_bytes_active(), model.dtype_bytes);
         let active_pct = model.active_param_fraction() * 100.0;
         println!("  Type           MoE (sparse activation)");
-        println!("  Parameters     {} params ({})  |  {} active/token ({:.1}%)",
-            total_params, fmt_bytes(model.weight_bytes), active_params, active_pct);
+        println!(
+            "  Parameters     {} params ({})  |  {} active/token ({:.1}%)",
+            total_params,
+            fmt_bytes(model.weight_bytes),
+            active_params,
+            active_pct
+        );
     } else {
         println!("  Type           dense");
-        println!("  Parameters     {} params ({})",
-            total_params, fmt_bytes(model.weight_bytes));
+        println!(
+            "  Parameters     {} params ({})",
+            total_params,
+            fmt_bytes(model.weight_bytes)
+        );
     }
 
-    println!("  Dtype          {}  ({} byte/param)", dtype_label(model.dtype_bytes), model.dtype_bytes);
-    println!("  Architecture   {} layers  |  d_model={}  |  {} kv-heads × {} head-dim",
-        model.n_layers, model.d_model, model.n_kv_heads, model.head_dim);
+    println!(
+        "  Dtype          {}  ({} byte/param)",
+        dtype_label(model.dtype_bytes),
+        model.dtype_bytes
+    );
+    println!(
+        "  Architecture   {} layers  |  d_model={}  |  {} kv-heads × {} head-dim",
+        model.n_layers, model.d_model, model.n_kv_heads, model.head_dim
+    );
 
     if model.is_moe() {
         let layer_str = if model.n_moe_layers < model.n_layers {
-            format!("{} MoE + {} dense", model.n_moe_layers, model.n_layers - model.n_moe_layers)
+            format!(
+                "{} MoE + {} dense",
+                model.n_moe_layers,
+                model.n_layers - model.n_moe_layers
+            )
         } else {
             format!("all {} MoE", model.n_moe_layers)
         };
@@ -231,71 +266,122 @@ fn print_model_card(args: &Args) {
             String::new()
         };
         println!("  MoE layers     {}", layer_str);
-        println!("  Experts        {} routable{}  |  top-{} per token",
-            model.n_experts, shared_str, model.n_active_experts);
+        println!(
+            "  Experts        {} routable{}  |  top-{} per token",
+            model.n_experts, shared_str, model.n_active_experts
+        );
     }
 
     // KV cache
     let kv_per_token_kb = model.kv_bytes(1) as f64 / 1024.0;
     if model.kv_lora_rank > 0 {
-        let std_kv_kb = 2.0 * model.n_layers as f64 * model.n_kv_heads as f64
-            * model.head_dim as f64 * model.dtype_bytes as f64 / 1024.0;
+        let std_kv_kb = 2.0
+            * model.n_layers as f64
+            * model.n_kv_heads as f64
+            * model.head_dim as f64
+            * model.dtype_bytes as f64
+            / 1024.0;
         let compression = std_kv_kb / kv_per_token_kb;
         println!("  KV cache (MLA) {} L × rank-{}  =  {:.1} KB/token  ({:.0}× smaller than MHA {:.0} KB)",
             model.n_layers, model.kv_lora_rank, kv_per_token_kb, compression, std_kv_kb);
     } else {
-        println!("  KV cache       {} L × {} H × {}  =  {:.1} KB/token",
-            model.n_layers, model.n_kv_heads, model.head_dim, kv_per_token_kb);
+        println!(
+            "  KV cache       {} L × {} H × {}  =  {:.1} KB/token",
+            model.n_layers, model.n_kv_heads, model.head_dim, kv_per_token_kb
+        );
     }
 
     // Cluster section
     let cluster_desc = build_cluster_desc(args, &gpu);
     println!("Cluster {}", sep);
     println!("  {}", cluster_desc);
-    let peak_flops = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 { gpu.flops_fp8 } else { gpu.flops_bf16 };
-    let dtype_tag = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 { "FP8" } else { "BF16" };
-    println!("  HBM per GPU    {}  ({:.0} TFLOPS {} peak)", fmt_bytes(gpu.hbm_capacity), peak_flops / 1e12, dtype_tag);
+    let peak_flops = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 {
+        gpu.flops_fp8
+    } else {
+        gpu.flops_bf16
+    };
+    let dtype_tag = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 {
+        "FP8"
+    } else {
+        "BF16"
+    };
+    println!(
+        "  HBM per GPU    {}  ({:.0} TFLOPS {} peak)",
+        fmt_bytes(gpu.hbm_capacity),
+        peak_flops / 1e12,
+        dtype_tag
+    );
 
     let weight_fit = if fits {
-        format!("✓ fits  ({}/GPU < {} HBM)",
-            fmt_bytes(weight_per_gpu), fmt_bytes(gpu.hbm_capacity))
+        format!(
+            "✓ fits  ({}/GPU < {} HBM)",
+            fmt_bytes(weight_per_gpu),
+            fmt_bytes(gpu.hbm_capacity)
+        )
     } else {
-        let min_tp = ((model.weight_bytes as f64 / (gpu.hbm_capacity as f64 * 0.85)).ceil() as u32).max(2);
-        format!("✗ EXCEEDS HBM  ({}/GPU > {} HBM)  — use --tp {} or higher",
-            fmt_bytes(weight_per_gpu), fmt_bytes(gpu.hbm_capacity), min_tp)
+        let min_tp =
+            ((model.weight_bytes as f64 / (gpu.hbm_capacity as f64 * 0.85)).ceil() as u32).max(2);
+        format!(
+            "✗ EXCEEDS HBM  ({}/GPU > {} HBM)  — use --tp {} or higher",
+            fmt_bytes(weight_per_gpu),
+            fmt_bytes(gpu.hbm_capacity),
+            min_tp
+        )
     };
-    println!("  Weights        {}  total  →  {}", fmt_bytes(model.weight_bytes), weight_fit);
+    println!(
+        "  Weights        {}  total  →  {}",
+        fmt_bytes(model.weight_bytes),
+        weight_fit
+    );
 
     let cluster_flops_pflops = peak_flops * n_gpus as f64 / 1e15;
-    println!("  Peak FLOPS     {:.1} TFLOPS {} × {} GPUs  =  {:.1} PFLOPS",
-        peak_flops / 1e12, dtype_tag, n_gpus, cluster_flops_pflops);
+    println!(
+        "  Peak FLOPS     {:.1} TFLOPS {} × {} GPUs  =  {:.1} PFLOPS",
+        peak_flops / 1e12,
+        dtype_tag,
+        n_gpus,
+        cluster_flops_pflops
+    );
 
-    println!("  KV budget      {} blocks × {} tok  =  {:>8} tokens  ({})",
-        kv_total_blocks, args.kv_block_size,
-        fmt_with_commas(kv_total_tokens), fmt_bytes(kv_total_bytes));
+    println!(
+        "  KV budget      {} blocks × {} tok  =  {:>8} tokens  ({})",
+        kv_total_blocks,
+        args.kv_block_size,
+        fmt_with_commas(kv_total_tokens),
+        fmt_bytes(kv_total_bytes)
+    );
 
     if args.ep > 1 {
-        println!("  Expert par.    EP={}  ({} experts/GPU)",
+        println!(
+            "  Expert par.    EP={}  ({} experts/GPU)",
             args.ep,
-            (model.n_experts / args.ep).max(1));
+            (model.n_experts / args.ep).max(1)
+        );
     }
     if args.spec_tokens > 0 {
-        let draft_name = args.draft_model.as_deref().unwrap_or("auto (1/10 main model)");
+        let draft_name = args
+            .draft_model
+            .as_deref()
+            .unwrap_or("auto (1/10 main model)");
         let expected_tok = {
             let k = args.spec_tokens as f64;
             let g = args.spec_acceptance_rate.clamp(0.0, 1.0 - 1e-9);
             (1.0 - g.powf(k + 1.0)) / (1.0 - g)
         };
-        println!("  Spec decode    K={}  γ={:.2}  draft={}  → {:.2} tok/step expected",
-            args.spec_tokens, args.spec_acceptance_rate, draft_name, expected_tok);
+        println!(
+            "  Spec decode    K={}  γ={:.2}  draft={}  → {:.2} tok/step expected",
+            args.spec_tokens, args.spec_acceptance_rate, draft_name, expected_tok
+        );
     }
     if args.mtp_heads > 0 {
         let k = args.mtp_heads as f64;
         let g = args.mtp_acceptance_rate.clamp(0.0, 1.0 - 1e-9);
         let expected_tok = (1.0 - g.powf(k + 1.0)) / (1.0 - g);
         let overhead_pct = k / model.n_layers as f64 * 100.0;
-        println!("  MTP            K={}  γ={:.2}  overhead={:.1}%/step  → {:.2} tok/step expected",
-            args.mtp_heads, args.mtp_acceptance_rate, overhead_pct, expected_tok);
+        println!(
+            "  MTP            K={}  γ={:.2}  overhead={:.1}%/step  → {:.2} tok/step expected",
+            args.mtp_heads, args.mtp_acceptance_rate, overhead_pct, expected_tok
+        );
     }
 
     println!("{}", sep);
@@ -305,10 +391,18 @@ fn print_model_card(args: &Args) {
 fn build_cluster_desc(args: &Args, gpu: &GpuSpec) -> String {
     let n_gpus = args.tp * args.pp;
     let mut parts = vec![format!("{}× {}", n_gpus, gpu.name)];
-    if args.tp > 1 { parts.push(format!("TP={}", args.tp)); }
-    if args.pp > 1 { parts.push(format!("PP={}", args.pp)); }
-    if args.ep > 1 { parts.push(format!("EP={}", args.ep)); }
-    if args.disaggregate { parts.push("disaggregated P/D".to_string()); }
+    if args.tp > 1 {
+        parts.push(format!("TP={}", args.tp));
+    }
+    if args.pp > 1 {
+        parts.push(format!("PP={}", args.pp));
+    }
+    if args.ep > 1 {
+        parts.push(format!("EP={}", args.ep));
+    }
+    if args.disaggregate {
+        parts.push("disaggregated P/D".to_string());
+    }
     parts.join("  |  ")
 }
 
@@ -316,7 +410,9 @@ fn fmt_with_commas(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 { out.push(','); }
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
         out.push(c);
     }
     out.chars().rev().collect()
@@ -325,10 +421,10 @@ fn fmt_with_commas(n: u64) -> String {
 // ── run_once ──────────────────────────────────────────────────────────────────
 
 fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSummary {
-    let gpu_spec = GpuSpec::preset(&args.gpu)
-        .unwrap_or_else(|| panic!("Unknown GPU '{}'", args.gpu));
-    let model = LlmConfig::preset(&args.model)
-        .unwrap_or_else(|| panic!("Unknown model '{}'", args.model));
+    let gpu_spec =
+        GpuSpec::preset(&args.gpu).unwrap_or_else(|| panic!("Unknown GPU '{}'", args.gpu));
+    let model =
+        LlmConfig::preset(&args.model).unwrap_or_else(|| panic!("Unknown model '{}'", args.model));
 
     let kv_total_blocks = if args.kv_blocks > 0 {
         args.kv_blocks
@@ -337,43 +433,57 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     };
 
     let scheduler = match args.scheduler.as_str() {
-        "continuous-batch" => SchedulerKind::Continuous(ContinuousBatchScheduler::new(args.max_batch_tokens)),
-        "chunked-prefill"  => SchedulerKind::Chunked(ChunkedPrefillScheduler::new(args.chunk_size, args.max_batch_tokens)),
+        "continuous-batch" => {
+            SchedulerKind::Continuous(ContinuousBatchScheduler::new(args.max_batch_tokens))
+        }
+        "chunked-prefill" => SchedulerKind::Chunked(ChunkedPrefillScheduler::new(
+            args.chunk_size,
+            args.max_batch_tokens,
+        )),
         other => panic!("Unknown scheduler '{}'", other),
     };
 
     let cluster = ClusterConfig {
-        tp: args.tp, pp: args.pp, ep: args.ep,
+        tp: args.tp,
+        pp: args.pp,
+        ep: args.ep,
         nvlink_bw: gpu_spec.nvlink_bandwidth,
         internode_bw: args.internode_bw_gbps * 1e9,
         disaggregate: args.disaggregate,
     };
 
     let mut prefill_gpu = GpuState::new(0, gpu_spec.clone());
-    if let Some(k) = kt { prefill_gpu = prefill_gpu.with_kernel_table(k.clone()); }
+    if let Some(k) = kt {
+        prefill_gpu = prefill_gpu.with_kernel_table(k.clone());
+    }
 
     let decode_gpu = if args.disaggregate {
         let mut g = GpuState::new(1, gpu_spec.clone());
-        if let Some(k) = kt { g = g.with_kernel_table(k.clone()); }
+        if let Some(k) = kt {
+            g = g.with_kernel_table(k.clone());
+        }
         Some(g)
     } else {
         None
     };
 
     let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
-    let latency_mode = if kt.is_some() { "kernel-table+roofline" } else { "roofline" };
+    let latency_mode = if kt.is_some() {
+        "kernel-table+roofline"
+    } else {
+        "roofline"
+    };
 
     let spec = if args.spec_tokens > 0 {
-        let draft = match args.draft_model.as_deref()
-            .and_then(LlmConfig::preset)
-        {
+        let draft = match args.draft_model.as_deref().and_then(LlmConfig::preset) {
             Some(m) => m,
             None => {
                 // No draft model specified: synthesise one at 1/10 the weight size of the main model.
                 let mut d = model.clone();
                 d.name = format!("{}-draft", d.name);
                 d.weight_bytes = (d.weight_bytes / 10).max(1);
-                d.active_weight_bytes = (d.active_weight_bytes / 10).max(if d.active_weight_bytes > 0 { 1 } else { 0 });
+                d.active_weight_bytes =
+                    (d.active_weight_bytes / 10).max(if d.active_weight_bytes > 0 { 1 } else { 0 });
                 d
             }
         };
@@ -404,28 +514,60 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         let path = &args.workload["trace:".len()..];
         let mut trace = TraceReplay::from_csv(Path::new(path))
             .unwrap_or_else(|e| panic!("Cannot load trace '{}': {}", path, e));
-        Simulator::new(prefill_gpu, decode_gpu, model.clone(), cluster, scheduler, &mut trace, kv)
+        Simulator::new(
+            prefill_gpu,
+            decode_gpu,
+            model.clone(),
+            cluster,
+            scheduler,
+            &mut trace,
+            kv,
+        )
     } else {
-        let mut w = SyntheticWorkload::new(arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed);
-        Simulator::new(prefill_gpu, decode_gpu, model.clone(), cluster, scheduler, &mut w, kv)
+        let mut w = SyntheticWorkload::new(
+            arrival_rate,
+            args.prompt_mean,
+            args.output_mean,
+            args.duration,
+            args.seed,
+        );
+        Simulator::new(
+            prefill_gpu,
+            decode_gpu,
+            model.clone(),
+            cluster,
+            scheduler,
+            &mut w,
+            kv,
+        )
     };
-    if let Some(s) = spec { sim = sim.with_spec(s); }
-    if let Some(m) = mtp  { sim = sim.with_mtp(m); }
+    if let Some(s) = spec {
+        sim = sim.with_spec(s);
+    }
+    if let Some(m) = mtp {
+        sim = sim.with_mtp(m);
+    }
 
     sim.run(args.duration);
 
     let parallelism = match (args.tp, args.pp, args.disaggregate) {
         (1, 1, false) => "single-gpu".to_string(),
-        (1, 1, true)  => "disaggregated".to_string(),
+        (1, 1, true) => "disaggregated".to_string(),
         (tp, 1, false) => format!("TP={tp}"),
         (1, pp, false) => format!("PP={pp}"),
         (tp, pp, false) => format!("TP={tp} PP={pp}"),
-        (tp, pp, true)  => format!("TP={tp} PP={pp} disaggregated"),
+        (tp, pp, true) => format!("TP={tp} PP={pp} disaggregated"),
     };
 
     sim.metrics.to_summary(
-        &model.name, &gpu_spec.name, &format!("{} {}", args.scheduler, parallelism),
-        args.tp, args.pp, args.disaggregate, arrival_rate, latency_mode,
+        &model.name,
+        &gpu_spec.name,
+        &format!("{} {}", args.scheduler, parallelism),
+        args.tp,
+        args.pp,
+        args.disaggregate,
+        arrival_rate,
+        latency_mode,
     )
 }
 
@@ -449,12 +591,12 @@ fn load_reference_csv(path: &str) -> Result<Vec<RefRow>, Box<dyn std::error::Err
     for rec in rdr.records() {
         let rec = rec?;
         rows.push(RefRow {
-            gpu:     rec.get(0).ok_or("missing gpu")?.to_string(),
-            model:   rec.get(1).ok_or("missing model")?.to_string(),
-            op:      rec.get(2).ok_or("missing op")?.to_string(),
-            batch:   rec.get(3).ok_or("missing batch_size")?.parse()?,
+            gpu: rec.get(0).ok_or("missing gpu")?.to_string(),
+            model: rec.get(1).ok_or("missing model")?.to_string(),
+            op: rec.get(2).ok_or("missing op")?.to_string(),
+            batch: rec.get(3).ok_or("missing batch_size")?.parse()?,
             seq_len: rec.get(4).ok_or("missing seq_len")?.parse()?,
-            ref_ms:  rec.get(5).ok_or("missing latency_ms")?.parse()?,
+            ref_ms: rec.get(5).ok_or("missing latency_ms")?.parse()?,
         });
     }
     Ok(rows)
@@ -463,54 +605,96 @@ fn load_reference_csv(path: &str) -> Result<Vec<RefRow>, Box<dyn std::error::Err
 fn validate_kernels(path: &str) {
     let rows = match load_reference_csv(path) {
         Ok(r) => r,
-        Err(e) => { eprintln!("Cannot load reference CSV '{}': {}", path, e); return; }
+        Err(e) => {
+            eprintln!("Cannot load reference CSV '{}': {}", path, e);
+            return;
+        }
     };
 
     let sep = "─".repeat(72);
     println!("Roofline vs reference  {}", sep);
-    println!("{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9} {:>9} {:>8}",
-        "GPU", "Model", "Op", "Batch", "SeqLen", "Ref(ms)", "Sim(ms)", "Err%");
+    println!(
+        "{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9} {:>9} {:>8}",
+        "GPU", "Model", "Op", "Batch", "SeqLen", "Ref(ms)", "Sim(ms)", "Err%"
+    );
     println!("{}", sep);
 
-    struct GroupStats { sum_abs_err: f64, count: u32 }
-    let mut groups: std::collections::BTreeMap<(String, String), GroupStats> = std::collections::BTreeMap::new();
+    struct GroupStats {
+        sum_abs_err: f64,
+        count: u32,
+    }
+    let mut groups: std::collections::BTreeMap<(String, String), GroupStats> =
+        std::collections::BTreeMap::new();
 
     for row in &rows {
-        let gpu_spec = match GpuSpec::preset(&row.gpu.to_lowercase()
-            .replace("h100-sxm5", "h100").replace("a100-80gb", "a100").replace("a10g", "a10g"))
-        {
+        let gpu_spec = match GpuSpec::preset(
+            &row.gpu
+                .to_lowercase()
+                .replace("h100-sxm5", "h100")
+                .replace("a100-80gb", "a100"),
+        ) {
             Some(g) => g,
             None => {
                 // Try lowercase match more carefully
-                let key = if row.gpu.contains("H100") { "h100" }
-                    else if row.gpu.contains("A100") { "a100" }
-                    else if row.gpu.contains("A10G") { "a10g" }
-                    else { eprintln!("Unknown GPU '{}', skipping", row.gpu); continue; };
+                let key = if row.gpu.contains("H100") {
+                    "h100"
+                } else if row.gpu.contains("A100") {
+                    "a100"
+                } else if row.gpu.contains("A10G") {
+                    "a10g"
+                } else {
+                    eprintln!("Unknown GPU '{}', skipping", row.gpu);
+                    continue;
+                };
                 match GpuSpec::preset(key) {
                     Some(g) => g,
-                    None => { eprintln!("Unknown GPU '{}', skipping", row.gpu); continue; }
+                    None => {
+                        eprintln!("Unknown GPU '{}', skipping", row.gpu);
+                        continue;
+                    }
                 }
             }
         };
         let model = match LlmConfig::preset(&row.model) {
             Some(m) => m,
-            None => { eprintln!("Unknown model '{}', skipping", row.model); continue; }
+            None => {
+                eprintln!("Unknown model '{}', skipping", row.model);
+                continue;
+            }
         };
 
         let cluster = ClusterConfig::single_gpu();
         let sim_ms = match row.op.as_str() {
-            "prefill" => gpu_spec.prefill_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0,
-            "decode"  => gpu_spec.decode_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0,
-            other => { eprintln!("Unknown op '{}', skipping", other); continue; }
+            "prefill" => {
+                gpu_spec.prefill_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0
+            }
+            "decode" => {
+                gpu_spec.decode_latency(row.batch, row.seq_len, &model, None, &cluster) * 1000.0
+            }
+            other => {
+                eprintln!("Unknown op '{}', skipping", other);
+                continue;
+            }
         };
 
         let err_pct = (sim_ms - row.ref_ms) / row.ref_ms * 100.0;
-        let marker = if err_pct.abs() > 20.0 { " !" } else if err_pct.abs() > 10.0 { " ?" } else { "" };
-        println!("{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9.2} {:>9.2} {:>+7.1}%{}",
-            row.gpu, row.model, row.op, row.batch, row.seq_len, row.ref_ms, sim_ms, err_pct, marker);
+        let marker = if err_pct.abs() > 20.0 {
+            " !"
+        } else if err_pct.abs() > 10.0 {
+            " ?"
+        } else {
+            ""
+        };
+        println!(
+            "{:<16} {:<16} {:<8} {:>6} {:>7}  {:>9.2} {:>9.2} {:>+7.1}%{}",
+            row.gpu, row.model, row.op, row.batch, row.seq_len, row.ref_ms, sim_ms, err_pct, marker
+        );
 
         let key = (row.gpu.clone(), row.op.clone());
-        let entry = groups.entry(key).or_insert(GroupStats { sum_abs_err: 0.0, count: 0 });
+        let entry = groups.entry(key).or_insert(GroupStats {
+            sum_abs_err: 0.0,
+            count: 0,
+        });
         entry.sum_abs_err += err_pct.abs();
         entry.count += 1;
     }
@@ -519,14 +703,24 @@ fn validate_kernels(path: &str) {
     println!("MAPE by group:");
     for ((gpu, op), stats) in &groups {
         let mape = stats.sum_abs_err / stats.count as f64;
-        let flag = if mape > 20.0 { " ← HIGH" } else if mape > 10.0 { " ← marginal" } else { "" };
-        println!("  {:<16} {:>7}: {:>5.1}% MAPE  (n={}){}",
-            gpu, op, mape, stats.count, flag);
+        let flag = if mape > 20.0 {
+            " ← HIGH"
+        } else if mape > 10.0 {
+            " ← marginal"
+        } else {
+            ""
+        };
+        println!(
+            "  {:<16} {:>7}: {:>5.1}% MAPE  (n={}){}",
+            gpu, op, mape, stats.count, flag
+        );
     }
     println!("{}", sep);
     println!();
     println!("To reduce error: tune mfu_prefill/mfu_decode in GpuSpec::preset().");
-    println!("  If sim > ref: increase the corresponding MFU (GPU is more efficient than modeled).");
+    println!(
+        "  If sim > ref: increase the corresponding MFU (GPU is more efficient than modeled)."
+    );
     println!("  If sim < ref: decrease MFU. Target < 10% MAPE for production accuracy.");
 }
 
@@ -549,7 +743,8 @@ fn main() {
 
     // ── sweep mode ────────────────────────────────────────────────────────────
     if let Some(rates_str) = &args.sweep_arrival_rates {
-        let rates: Vec<f64> = rates_str.split(',')
+        let rates: Vec<f64> = rates_str
+            .split(',')
             .filter_map(|s| s.trim().parse().ok())
             .collect();
 
@@ -558,15 +753,18 @@ fn main() {
             std::process::exit(1);
         }
 
-        let summaries: Vec<RunSummary> = rates.par_iter()
+        let summaries: Vec<RunSummary> = rates
+            .par_iter()
             .map(|&rate| run_once(&args, rate, kt.as_ref()))
             .collect();
 
         match args.output.as_str() {
             "json" => println!("{}", serde_json::to_string_pretty(&summaries).unwrap()),
-            "csv"  => {
+            "csv" => {
                 RunSummary::print_csv_header();
-                for s in &summaries { s.print_csv_row(); }
+                for s in &summaries {
+                    s.print_csv_row();
+                }
             }
             _ => {
                 for s in &summaries {
@@ -584,7 +782,10 @@ fn main() {
 
     match args.output.as_str() {
         "json" => summary.print_json(),
-        "csv"  => { RunSummary::print_csv_header(); summary.print_csv_row(); }
-        _      => summary.print_text(),
+        "csv" => {
+            RunSummary::print_csv_header();
+            summary.print_csv_row();
+        }
+        _ => summary.print_text(),
     }
 }

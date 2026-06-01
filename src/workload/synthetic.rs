@@ -1,5 +1,5 @@
-use rand::SeedableRng;
 use rand::rngs::SmallRng;
+use rand::SeedableRng;
 use rand_distr::{Distribution, Exp, LogNormal};
 
 use crate::engine::event::SimTime;
@@ -19,7 +19,13 @@ pub struct SyntheticWorkload {
 
 impl SyntheticWorkload {
     /// arrival_rate: requests/second. prompt_mean/output_mean: tokens (log-normal mean).
-    pub fn new(arrival_rate: f64, prompt_mean: f64, output_mean: f64, end_time: SimTime, seed: u64) -> Self {
+    pub fn new(
+        arrival_rate: f64,
+        prompt_mean: f64,
+        output_mean: f64,
+        end_time: SimTime,
+        seed: u64,
+    ) -> Self {
         // LogNormal params: mu/sigma in log-space. We derive from desired mean.
         // mean = exp(mu + sigma²/2). For sigma=0.5: mu = ln(mean) - 0.125
         let sigma = 0.5_f64;
@@ -35,7 +41,6 @@ impl SyntheticWorkload {
             end_time,
         }
     }
-
 }
 
 impl WorkloadSource for SyntheticWorkload {

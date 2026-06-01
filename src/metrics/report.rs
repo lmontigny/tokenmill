@@ -49,16 +49,24 @@ impl RunSummary {
         println!("Token throughput   : {:.0} tok/s", self.token_throughput);
         println!("KV utilization     : mean={:.1}%", self.kv_util_mean_pct);
         println!();
-        println!("TTFT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
-            self.ttft_p50_ms, self.ttft_p95_ms, self.ttft_p99_ms);
-        println!("Prefill time (ms)   p50={:.1}  p95={:.1}  p99={:.1}",
-            self.prefill_p50_ms, self.prefill_p95_ms, self.prefill_p99_ms);
+        println!(
+            "TTFT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
+            self.ttft_p50_ms, self.ttft_p95_ms, self.ttft_p99_ms
+        );
+        println!(
+            "Prefill time (ms)   p50={:.1}  p95={:.1}  p99={:.1}",
+            self.prefill_p50_ms, self.prefill_p95_ms, self.prefill_p99_ms
+        );
         if self.disaggregate {
-            println!("KV transfer (ms)    p50={:.1}  p95={:.1}  p99={:.1}",
-                self.kv_transfer_p50_ms, self.kv_transfer_p95_ms, self.kv_transfer_p99_ms);
+            println!(
+                "KV transfer (ms)    p50={:.1}  p95={:.1}  p99={:.1}",
+                self.kv_transfer_p50_ms, self.kv_transfer_p95_ms, self.kv_transfer_p99_ms
+            );
         }
-        println!("TPOT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
-            self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms);
+        println!(
+            "TPOT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
+            self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms
+        );
     }
 
     pub fn print_json(&self) {
@@ -67,11 +75,13 @@ impl RunSummary {
 
     /// Print CSV header row.
     pub fn print_csv_header() {
-        println!("model,gpu,scheduler,tp,pp,disaggregate,arrival_rate,completions,\
+        println!(
+            "model,gpu,scheduler,tp,pp,disaggregate,arrival_rate,completions,\
                   throughput_rps,token_throughput,kv_util_mean_pct,\
                   ttft_p50_ms,ttft_p95_ms,ttft_p99_ms,\
                   prefill_p50_ms,prefill_p95_ms,prefill_p99_ms,\
-                  kv_transfer_p50_ms,tpot_p50_ms,tpot_p95_ms,tpot_p99_ms");
+                  kv_transfer_p50_ms,tpot_p50_ms,tpot_p95_ms,tpot_p99_ms"
+        );
     }
 
     pub fn print_csv_row(&self) {

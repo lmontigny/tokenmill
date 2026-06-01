@@ -3,10 +3,10 @@ use hdrhistogram::Histogram;
 use super::report::RunSummary;
 
 pub struct MetricsCollector {
-    ttft: Histogram<u64>,           // microseconds — arrival → first output token
-    prefill_lat: Histogram<u64>,    // microseconds — arrival → prefill done
-    kv_transfer: Histogram<u64>,    // microseconds — KV transfer time (disaggregated only)
-    tpot: Histogram<u64>,           // microseconds
+    ttft: Histogram<u64>,        // microseconds — arrival → first output token
+    prefill_lat: Histogram<u64>, // microseconds — arrival → prefill done
+    kv_transfer: Histogram<u64>, // microseconds — KV transfer time (disaggregated only)
+    tpot: Histogram<u64>,        // microseconds
     pub completions: u64,
     pub tokens_generated: u64,
     pub preemptions: u64,
@@ -15,6 +15,12 @@ pub struct MetricsCollector {
     kv_util_samples: u64,
     pub kv_util_final: f64,
     pub disaggregated: bool,
+}
+
+impl Default for MetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MetricsCollector {
@@ -40,12 +46,16 @@ impl MetricsCollector {
     }
 
     pub fn record_prefill_latency(&mut self, secs: f64) {
-        let _ = self.prefill_lat.record((secs * 1_000_000.0).max(1.0) as u64);
+        let _ = self
+            .prefill_lat
+            .record((secs * 1_000_000.0).max(1.0) as u64);
     }
 
     pub fn record_kv_transfer(&mut self, secs: f64) {
         if secs > 0.0 {
-            let _ = self.kv_transfer.record((secs * 1_000_000.0).max(1.0) as u64);
+            let _ = self
+                .kv_transfer
+                .record((secs * 1_000_000.0).max(1.0) as u64);
         }
     }
 
@@ -68,38 +78,58 @@ impl MetricsCollector {
     }
 
     pub fn kv_util_mean(&self) -> f64 {
-        if self.kv_util_samples == 0 { 0.0 } else { self.kv_util_sum / self.kv_util_samples as f64 }
+        if self.kv_util_samples == 0 {
+            0.0
+        } else {
+            self.kv_util_sum / self.kv_util_samples as f64
+        }
     }
 
     fn pct(h: &Histogram<u64>, q: f64) -> f64 {
         h.value_at_quantile(q) as f64 / 1000.0 // µs → ms
     }
 
-    pub fn to_summary(&self, model: &str, gpu: &str, scheduler: &str, tp: u32, pp: u32,
-                      disaggregate: bool, arrival_rate: f64, latency_mode: &str) -> RunSummary {
+    #[allow(clippy::too_many_arguments)]
+    pub fn to_summary(
+        &self,
+        model: &str,
+        gpu: &str,
+        scheduler: &str,
+        tp: u32,
+        pp: u32,
+        disaggregate: bool,
+        arrival_rate: f64,
+        latency_mode: &str,
+    ) -> RunSummary {
         let throughput = self.completions as f64 / self.sim_duration.max(1e-9);
         let tok_throughput = self.tokens_generated as f64 / self.sim_duration.max(1e-9);
         RunSummary {
-            model: model.into(), gpu: gpu.into(), scheduler: scheduler.into(),
-            tp, pp, disaggregate, arrival_rate, duration_s: self.sim_duration,
+            model: model.into(),
+            gpu: gpu.into(),
+            scheduler: scheduler.into(),
+            tp,
+            pp,
+            disaggregate,
+            arrival_rate,
+            duration_s: self.sim_duration,
             latency_mode: latency_mode.into(),
             completions: self.completions,
             preemptions: self.preemptions,
             throughput_rps: throughput,
             token_throughput: tok_throughput,
             kv_util_mean_pct: self.kv_util_mean() * 100.0,
-            ttft_p50_ms:        Self::pct(&self.ttft, 0.50),
-            ttft_p95_ms:        Self::pct(&self.ttft, 0.95),
-            ttft_p99_ms:        Self::pct(&self.ttft, 0.99),
-            prefill_p50_ms:     Self::pct(&self.prefill_lat, 0.50),
-            prefill_p95_ms:     Self::pct(&self.prefill_lat, 0.95),
-            prefill_p99_ms:     Self::pct(&self.prefill_lat, 0.99),
+            ttft_p50_ms: Self::pct(&self.ttft, 0.50),
+            ttft_p95_ms: Self::pct(&self.ttft, 0.95),
+            ttft_p99_ms: Self::pct(&self.ttft, 0.99),
+            prefill_p50_ms: Self::pct(&self.prefill_lat, 0.50),
+            prefill_p95_ms: Self::pct(&self.prefill_lat, 0.95),
+            prefill_p99_ms: Self::pct(&self.prefill_lat, 0.99),
             kv_transfer_p50_ms: Self::pct(&self.kv_transfer, 0.50),
             kv_transfer_p95_ms: Self::pct(&self.kv_transfer, 0.95),
             kv_transfer_p99_ms: Self::pct(&self.kv_transfer, 0.99),
-            tpot_p50_ms:        Self::pct(&self.tpot, 0.50),
-            tpot_p95_ms:        Self::pct(&self.tpot, 0.95),
-            tpot_p99_ms:        Self::pct(&self.tpot, 0.99),
+            tpot_p50_ms: Self::pct(&self.tpot, 0.50),
+            tpot_p95_ms: Self::pct(&self.tpot, 0.95),
+            tpot_p99_ms: Self::pct(&self.tpot, 0.99),
         }
     }
 
@@ -111,36 +141,47 @@ impl MetricsCollector {
         println!("Requests completed : {}", self.completions);
         println!("Throughput         : {:.2} req/s", throughput);
         println!("Token throughput   : {:.0} tok/s", tok_throughput);
-        println!("KV utilization     : mean={:.1}%  final={:.1}%",
-            self.kv_util_mean() * 100.0, self.kv_util_final * 100.0);
+        println!(
+            "KV utilization     : mean={:.1}%  final={:.1}%",
+            self.kv_util_mean() * 100.0,
+            self.kv_util_final * 100.0
+        );
         println!();
 
-        if self.ttft.len() > 0 {
-            println!("TTFT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
+        if !self.ttft.is_empty() {
+            println!(
+                "TTFT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
                 Self::pct(&self.ttft, 0.50),
                 Self::pct(&self.ttft, 0.95),
-                Self::pct(&self.ttft, 0.99));
+                Self::pct(&self.ttft, 0.99)
+            );
         }
 
-        if self.prefill_lat.len() > 0 {
-            println!("Prefill time (ms)   p50={:.1}  p95={:.1}  p99={:.1}",
+        if !self.prefill_lat.is_empty() {
+            println!(
+                "Prefill time (ms)   p50={:.1}  p95={:.1}  p99={:.1}",
                 Self::pct(&self.prefill_lat, 0.50),
                 Self::pct(&self.prefill_lat, 0.95),
-                Self::pct(&self.prefill_lat, 0.99));
+                Self::pct(&self.prefill_lat, 0.99)
+            );
         }
 
-        if self.disaggregated && self.kv_transfer.len() > 0 {
-            println!("KV transfer (ms)    p50={:.1}  p95={:.1}  p99={:.1}",
+        if self.disaggregated && !self.kv_transfer.is_empty() {
+            println!(
+                "KV transfer (ms)    p50={:.1}  p95={:.1}  p99={:.1}",
                 Self::pct(&self.kv_transfer, 0.50),
                 Self::pct(&self.kv_transfer, 0.95),
-                Self::pct(&self.kv_transfer, 0.99));
+                Self::pct(&self.kv_transfer, 0.99)
+            );
         }
 
-        if self.tpot.len() > 0 {
-            println!("TPOT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
+        if !self.tpot.is_empty() {
+            println!(
+                "TPOT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
                 Self::pct(&self.tpot, 0.50),
                 Self::pct(&self.tpot, 0.95),
-                Self::pct(&self.tpot, 0.99));
+                Self::pct(&self.tpot, 0.99)
+            );
         }
     }
 }
