@@ -255,6 +255,53 @@ impl LlmConfig {
                 kv_lora_rank: 512,
                 active_weight_bytes: 37_000_000_000,
             }),
+            // ── Frontier-class (≥ 1 T total parameters) ──────────────────────
+            // Kimi K2 (Moonshot AI, July 2025): 1.026 T total (fp8), 32 B active/token.
+            // 384 experts top-8 + 1 shared, 60 of 61 layers are MoE.
+            // MLA KV (kv_lora_rank = 512) — same compression trick as DeepSeek V3.
+            "kimi-k2" => Some(Self {
+                name: "kimi-k2".into(),
+                n_layers: 61,
+                d_model: 7168,
+                n_heads: 64,
+                n_kv_heads: 64,
+                head_dim: 128,
+                ffn_hidden: 18432,
+                vocab_size: 163840,
+                dtype_bytes: 1,
+                weight_bytes: 1_026_000_000_000,
+                n_experts: 384,
+                n_active_experts: 8,
+                n_shared_experts: 1,
+                n_moe_layers: 60,
+                expert_hidden: 2048,
+                kv_lora_rank: 512,
+                active_weight_bytes: 32_000_000_000,
+            }),
+            // Llama 4 Behemoth (Meta, announced 2025 — not publicly released):
+            // 2 T total (fp8), 288 B active/token. 16 experts top-1 + 1 shared.
+            // Architecture extrapolated from Llama 4 Scout/Maverick family;
+            // verify against final spec when released.
+            "llama4-behemoth" => Some(Self {
+                name: "llama4-behemoth".into(),
+                n_layers: 80,
+                d_model: 8192,
+                n_heads: 64,
+                n_kv_heads: 8,
+                head_dim: 128,
+                ffn_hidden: 28672,
+                vocab_size: 128256,
+                dtype_bytes: 1,
+                weight_bytes: 2_000_000_000_000,
+                n_experts: 16,
+                n_active_experts: 1,
+                n_shared_experts: 1,
+                n_moe_layers: 60,
+                // Each expert is large (~120 B params); per-expert hidden is correspondingly wide.
+                expert_hidden: 65536,
+                kv_lora_rank: 0,
+                active_weight_bytes: 288_000_000_000,
+            }),
             _ => None,
         }
     }

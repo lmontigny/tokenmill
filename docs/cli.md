@@ -5,7 +5,7 @@
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--gpu` | `h100` | GPU preset: `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` |
-| `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` |
+| `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` \| `kimi-k2` \| `llama4-behemoth` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
 | `--arrival-rate` | `5.0` | Requests per second (Poisson) |
@@ -43,9 +43,12 @@
 | `mixtral-8x7b` | MoE | 46.7 B (bf16) | ~12.9 B | 8 experts top-2, all layers MoE |
 | `llama4-maverick` | MoE | 400 B (fp8) | 17 B | 128 experts top-1+1 shared, 36/48 MoE layers |
 | `deepseek-v3` | MoE | 671 B (fp8) | 37 B | 256 experts top-8+1 shared, MLA KV compression |
+| `kimi-k2` | MoE | **1.026 T** (fp8) | 32 B | 384 experts top-8+1 shared, MLA KV (Moonshot AI, Jul 2025) |
+| `llama4-behemoth` | MoE | **2 T** (fp8) | 288 B | 16 experts top-1+1 shared (Meta, announced 2025; specs approximate) |
 
-DeepSeek V3 uses **Multi-head Latent Attention (MLA)** which compresses the KV cache to a 512-dimensional
-latent vector per layer — roughly 64× smaller than standard MHA — enabling long-context serving at scale.
+DeepSeek V3 and Kimi K2 both use **Multi-head Latent Attention (MLA)** which compresses the KV cache to a
+512-dimensional latent vector per layer — roughly 64× smaller than standard MHA — enabling long-context
+serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 
 ## GPU presets
 

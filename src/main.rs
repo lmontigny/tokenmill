@@ -25,7 +25,7 @@ struct Args {
     #[arg(long, default_value = "h100")]
     gpu: String,
 
-    /// Model preset: llama-70b | llama-8b | mixtral-8x7b | llama4-maverick | deepseek-v3
+    /// Model preset: llama-70b | llama-8b | (-fp8 variants) | mixtral-8x7b | llama4-maverick | deepseek-v3 | kimi-k2 | llama4-behemoth
     #[arg(long, default_value = "llama-70b")]
     model: String,
 

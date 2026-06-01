@@ -22,6 +22,10 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 16 | llama-8b-fp8 | **MI300X** TP=1 | chunked-prefill | 50 | 50.7 | **14 ms** | 29 ms | **3.0 ms** | MI300X vs H100 row 3: 33% lower TTFT, 33% lower TPOT |
 | 17 | llama-70b-fp8 | **MI355X** TP=4 | chunked-prefill | 5 | 5.2 | 13 ms | 23 ms | 3.1 ms | MI355X (CDNA 4) essentially ties B200 on 70B FP8 (row 13) |
 | 18 | deepseek-v3 | **MI355X** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | 4 ms | 7 ms | **0.8 ms** | MI355X matches B200 (row 14) on 671B MoE — sub-ms TPOT |
+| 19 | **kimi-k2** (1 T) | B200 TP=8 EP=8 | chunked-prefill | 2 | 2.1 | 3 ms | 5 ms | **0.7 ms** | 1.026 T MoE / 32 B active — MLA KV makes it as cheap to serve as a 32 B dense |
+| 20 | **kimi-k2** (1 T) | MI300X TP=8 EP=8 | chunked-prefill | 1 | 1.0 | 4 ms | 8 ms | 1.1 ms | Same 1 T model fits in 8×192 GB MI300X — no need for newer-gen HBM |
+| 21 | **kimi-k2** (1 T) | MI355X TP=8 EP=8 | chunked-prefill | 2 | 2.1 | 3 ms | 6 ms | **0.7 ms** | MI355X ties B200 at the trillion-param frontier |
+| 22 | **llama4-behemoth** (2 T) | B200 TP=16 EP=16 | chunked-prefill | 1 | 1.0 | 11 ms | 17 ms | 3.0 ms | 2 T total / 288 B active — needs 16 GPUs; active params dominate cost |
 
 Key patterns:
 - **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.
@@ -31,3 +35,5 @@ Key patterns:
 - **Rows 12–14**: B200 (Blackwell) delivers ~2.3–3× speedup over H100 across the board — 2× FP8 TFLOPS and 2.4× HBM BW (8 TB/s vs 3.35 TB/s).
 - **Rows 15–16**: MI300X's 192 GB HBM3 lets 70B-fp8 run on a single GPU (vs H100 needing TP=4). For memory-bound decode, MI300X beats H100 by ~33% at iso-config (row 16 vs row 3) — 5.3 TB/s vs 3.35 TB/s HBM, even after the 10% MFU haircut for ROCm maturity.
 - **Rows 17–18**: MI355X (CDNA 4) trades blows with B200 within a millisecond on both 70B-fp8 and 671B-MoE workloads.
+- **Rows 19–21**: Sparse MoE makes the trillion-param frontier tractable. Kimi K2 (1 T total / 32 B active) serves at 0.7 ms TPOT on 8 GPUs — the active-param footprint is what matters for decode bandwidth, not the total. MLA KV (32× smaller than MHA) is the second key enabler.
+- **Row 22**: Llama 4 Behemoth needs 9× more active params per token than Kimi K2 (288 B vs 32 B), so TPOT scales ~4× even though total params are only 2×. Active params, not total params, set the decode wall.

@@ -73,6 +73,50 @@ fn ep_shards_expert_weights() {
 }
 
 #[test]
+fn kimi_k2_uses_mla_kv() {
+    // Kimi K2 reuses DeepSeek V3's MLA trick — kv_lora_rank=512.
+    let k2 = LlmConfig::preset("kimi-k2").unwrap();
+    assert!(k2.is_moe());
+    assert_eq!(k2.kv_lora_rank, 512);
+    // 1T total, 32B active, ~3% activation.
+    let total_t = k2.weight_bytes as f64 / 1e12;
+    let active_b = k2.weight_bytes_active() as f64 / 1e9;
+    assert!(
+        total_t > 1.0 && total_t < 1.1,
+        "expected ~1.0 T total, got {:.2}",
+        total_t
+    );
+    assert!(
+        active_b > 30.0 && active_b < 35.0,
+        "expected ~32 B active, got {:.1}",
+        active_b
+    );
+}
+
+#[test]
+fn behemoth_active_params_dominate_decode_cost() {
+    // Behemoth (2 T / 288 B active) vs Kimi K2 (1 T / 32 B active) on the same cluster.
+    // Decode is memory-bound on active params → Behemoth should be ~9× slower per step.
+    let gpu = GpuSpec::preset("b200").unwrap();
+    let k2 = LlmConfig::preset("kimi-k2").unwrap();
+    let beh = LlmConfig::preset("llama4-behemoth").unwrap();
+    let mut c = ClusterConfig::single_gpu();
+    c.tp = 16;
+    c.ep = 16;
+    c.nvlink_bw = gpu.nvlink_bandwidth;
+
+    let t_k2 = gpu.decode_latency(1, 256, &k2, None, &c);
+    let t_beh = gpu.decode_latency(1, 256, &beh, None, &c);
+
+    let ratio = t_beh / t_k2;
+    assert!(
+        ratio > 4.0,
+        "Behemoth (288 B active) should be much slower than K2 (32 B); got {:.2}×",
+        ratio
+    );
+}
+
+#[test]
 fn ep_all_to_all_zero_when_ep_eq_one() {
     let mut c = ClusterConfig::single_gpu();
     c.nvlink_bw = 900e9;
