@@ -134,9 +134,10 @@ fn mi355x_has_fp8_tensor_cores() {
 }
 
 #[test]
-fn tpu_v8i_beats_b200_on_decode() {
-    // TPU v8i projected: 10 TB/s × 0.75 = 7.5 TB/s effective.
-    // B200: 8 TB/s × 0.75 = 6.0 TB/s effective. Expect ~1.25× speedup.
+fn tpu_8i_decode_close_to_b200() {
+    // Official TPU 8i specs: 8.6 TB/s HBM, 288 GB. B200: 8.0 TB/s HBM, 192 GB.
+    // With slightly higher HBM BW and slightly higher mfu_decode (0.80 vs 0.75 — CAE / on-chip SRAM),
+    // TPU 8i should beat B200 on memory-bound decode by ~10-15%, not run away from it.
     let b200 = GpuSpec::preset("b200").unwrap();
     let tpu = GpuSpec::preset("tpu-v8i").unwrap();
     let model = LlmConfig::preset("llama-70b-fp8").unwrap();
@@ -145,13 +146,21 @@ fn tpu_v8i_beats_b200_on_decode() {
     let b200_ms = b200.decode_latency(1, 256, &model, None, &c);
     let tpu_ms = tpu.decode_latency(1, 256, &model, None, &c);
 
-    assert!(tpu_ms < b200_ms, "TPU v8i should beat B200 on decode");
     let speedup = b200_ms / tpu_ms;
     assert!(
-        speedup > 1.1 && speedup < 1.5,
-        "TPU v8i vs B200: expected 1.1-1.5× speedup on decode, got {:.2}×",
+        speedup > 1.0 && speedup < 1.3,
+        "TPU 8i vs B200 decode: expected within 1.0-1.3×, got {:.2}×",
         speedup
     );
+}
+
+#[test]
+fn tpu_8i_has_larger_hbm_than_b200() {
+    // 288 GB vs 192 GB — key advantage for fitting big MoE on fewer chips.
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let tpu = GpuSpec::preset("tpu-v8i").unwrap();
+    assert!(tpu.hbm_capacity > b200.hbm_capacity);
+    assert_eq!(tpu.hbm_capacity, 288_000_000_000);
 }
 
 #[test]

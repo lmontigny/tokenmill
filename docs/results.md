@@ -27,8 +27,8 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 21 | **kimi-k2** (1 T) | MI355X TP=8 EP=8 | chunked-prefill | 2 | 2.1 | 3 ms | 6 ms | **0.7 ms** | MI355X ties B200 at the trillion-param frontier |
 | 22 | **llama4-behemoth** (2 T) | B200 TP=16 EP=16 | chunked-prefill | 1 | 1.0 | 11 ms | 17 ms | 3.0 ms | 2 T total / 288 B active — needs 16 GPUs; active params dominate cost |
 | 23 | llama-70b-fp8 | **TPU v7 Ironwood** TP=4 | chunked-prefill | 5 | 5.2 | 14 ms | 24 ms | 3.3 ms | TPU Ironwood matches MI355X / B200 within 1 ms on 70B-fp8 |
-| 24 | kimi-k2 (1 T) | **TPU v8i** TP=8 EP=8 | chunked-prefill | 2 | 2.1 | **2 ms** | 4 ms | **0.5 ms** | 2026 TPU (specs projected): fastest of all accelerators tested on 1 T MoE |
-| 25 | deepseek-v3 | **TPU v8i** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | **3 ms** | 5 ms | **0.6 ms** | Edges out B200 (row 14) — 10 TB/s HBM4 vs 8 TB/s HBM3e |
+| 24 | kimi-k2 (1 T) | **TPU 8i** TP=8 EP=8 | chunked-prefill | 2 | 2.1 | **2 ms** | 4 ms | **0.6 ms** | TPU 8i (288 GB HBM, 8.6 TB/s, Boardfly + CAE) on 1 T MoE — ties B200 |
+| 25 | deepseek-v3 | **TPU 8i** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | **3 ms** | 5 ms | **0.7 ms** | TPU 8i on 671 B MoE — matches B200 (row 14) within rounding |
 
 Key patterns:
 - **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.
@@ -40,4 +40,4 @@ Key patterns:
 - **Rows 17–18**: MI355X (CDNA 4) trades blows with B200 within a millisecond on both 70B-fp8 and 671B-MoE workloads.
 - **Rows 19–21**: Sparse MoE makes the trillion-param frontier tractable. Kimi K2 (1 T total / 32 B active) serves at 0.7 ms TPOT on 8 GPUs — the active-param footprint is what matters for decode bandwidth, not the total. MLA KV (32× smaller than MHA) is the second key enabler.
 - **Row 22**: Llama 4 Behemoth needs 9× more active params per token than Kimi K2 (288 B vs 32 B), so TPOT scales ~4× even though total params are only 2×. Active params, not total params, set the decode wall.
-- **Rows 23–25**: Google TPU v7 Ironwood matches the H100-class FP8 generation on equivalent workloads; TPU v8i (2026 specs projected from generational scaling) edges past B200 on memory-bound decode thanks to ~10 TB/s HBM4. The simulator treats ICI as a generic scale-up fabric and only models TP groups laid out along one torus dimension — accurate within-pod, not across DCN.
+- **Rows 23–25**: Google TPU v7 Ironwood matches the H100-class FP8 generation on equivalent workloads. TPU 8i (official 2026 specs: 288 GB HBM at 8.6 TB/s, Boardfly topology with on-chip Collectives Acceleration Engine) lands within 0.1 ms of B200 across both 1 T and 671 B MoE workloads — the per-chip HBM-BW advantage is offset by the slightly lower FP8 PFLOPs (5.05 vs B200's 4.5; both derived from FP4-class chips). The Boardfly 7-hop diameter (vs 16-hop torus on TPU 8t) is approximated by the existing ring-allreduce formula; under-estimates collective cost by ~10–20% when TP spans the OCS layer.

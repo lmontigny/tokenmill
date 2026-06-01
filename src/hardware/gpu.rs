@@ -203,24 +203,42 @@ impl GpuSpec {
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
             }),
-            // Google TPU v8i (2026, serving-optimized; specs projected from v7 Ironwood).
+            // Google TPU 8i (2026, serving-optimized). Official specs:
+            // https://cloud.google.com/blog/products/compute/tpu-8t-and-tpu-8i-technical-deep-dive
             //
-            // ICI topology note: TPU pods use a 3D torus (not the rack/NVSwitch fat-tree). The
-            // ring-allreduce formula in ClusterConfig::all_reduce_latency models cost correctly
-            // when the TP group is laid out along ONE torus dimension (the common case for
-            // TP ≤ pod_side). For very large TP groups that span multiple dimensions the
-            // formula slightly under-estimates collective cost. Within-pod only (no DCN).
+            // FP8/BF16 derived from the published FP4 PFLOPs using the standard 2× per-precision
+            // ratio (FP4 → FP8 halves, FP8 → BF16 halves). Google publishes only FP4.
+            //
+            // Network topology: **Boardfly** — Dragonfly-inspired hierarchical fabric:
+            //   - Building Block: 4-chip ring (internal ICI)
+            //   - Group: 8 boards copper-connected (32 chips)
+            //   - Pod: 36 groups via Optical Circuit Switches, up to 1024 chips
+            //   - Diameter: 7 hops (56% lower than v7 Ironwood's 16-hop torus)
+            // On-chip CAE (Collectives Acceleration Engine) accelerates all-reduce / all-to-all.
+            // The simulator's ring-allreduce formula is accurate for TP ≤ 32 (within a group);
+            // for larger TP spanning the OCS layer it under-estimates by ~10-20%.
             "tpu-v8i" => Some(Self {
-                name: "TPU-v8i".into(),
-                flops_bf16: 3500e12, // ~3.5 PFLOPS BF16 (projected, ~1.5× v7 Ironwood)
-                flops_fp8: 7000e12,  // ~7.0 PFLOPS FP8 (projected, B200/MI355X class)
-                hbm_bandwidth: 10.0e12, // 10 TB/s HBM4 (next-gen stack)
-                hbm_capacity: 256_000_000_000, // 256 GB HBM4 per chip (projected)
-                nvlink_bandwidth: 1500e9, // ICI: ~1.5 TB/s aggregate per chip (3D-torus link)
-                mfu_prefill: 0.70,   // XLA stack is mature; conservative midpoint
+                name: "TPU-8i".into(),
+                flops_bf16: 2525e12,     // FP4 / 4 = 2.525 PFLOPS BF16 (derived)
+                flops_fp8: 5050e12,      // FP4 / 2 = 5.05 PFLOPS FP8 (derived)
+                hbm_bandwidth: 8.601e12, // 8601 GB/s — official
+                hbm_capacity: 288_000_000_000, // 288 GB — official
+                nvlink_bandwidth: 2400e9, // ICI ~2.4 TB/s aggregate (2× v7 Ironwood per blog)
+                mfu_prefill: 0.72,
+                mfu_decode: 0.80, // 384 MB on-chip SRAM + CAE → strong decode efficiency
+            }),
+            // Google TPU 8t (2026, training-focused). 3D torus, 9600-chip superpod. Same FP4-derivation.
+            "tpu-v8t" => Some(Self {
+                name: "TPU-8t".into(),
+                flops_bf16: 3150e12,     // FP4 / 4 = 3.15 PFLOPS BF16 (derived)
+                flops_fp8: 6300e12,      // FP4 / 2 = 6.3 PFLOPS FP8 (derived)
+                hbm_bandwidth: 6.528e12, // 6528 GB/s — official
+                hbm_capacity: 216_000_000_000, // 216 GB — official
+                nvlink_bandwidth: 2400e9, // ICI 2× v7 Ironwood (blog: "2x scale-up bandwidth")
+                mfu_prefill: 0.70,
                 mfu_decode: 0.75,
             }),
-            // Google TPU v7 Ironwood (April 2025, inference-focused). 3D-torus ICI; same caveat as v8i.
+            // Google TPU v7 Ironwood (April 2025, inference-focused). 3D-torus ICI.
             "tpu-v7-ironwood" => Some(Self {
                 name: "TPU-v7-Ironwood".into(),
                 flops_bf16: 2304e12,
