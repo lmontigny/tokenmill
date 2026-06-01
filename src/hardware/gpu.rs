@@ -134,6 +134,17 @@ impl GpuSpec {
 
     pub fn preset(name: &str) -> Option<Self> {
         match name {
+            // NVIDIA Blackwell B200 SXM (NVL72/HGX). FP4 not modeled — listed for reference: 9000 TFLOPS dense.
+            "b200" => Some(Self {
+                name: "B200-SXM".into(),
+                flops_bf16: 2250e12,    // 2.25 PFLOPS dense BF16/FP16
+                flops_fp8:  4500e12,    // 4.5 PFLOPS dense FP8 (2× H100)
+                hbm_bandwidth: 8.0e12,  // 8 TB/s HBM3e (2.4× H100)
+                hbm_capacity: 192_000_000_000, // 192 GB HBM3e
+                nvlink_bandwidth: 1800e9,      // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
+                mfu_prefill: 0.70, // slightly lower than H100 — new gen, real-world kernels less mature
+                mfu_decode:  0.75,
+            }),
             "h100" => Some(Self {
                 name: "H100-SXM5".into(),
                 flops_bf16: 989e12,
