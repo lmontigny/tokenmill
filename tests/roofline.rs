@@ -164,6 +164,57 @@ fn tpu_8i_has_larger_hbm_than_b200() {
 }
 
 #[test]
+fn tpu_8i_sram_helps_small_batch_kv() {
+    // TPU 8i has 384 MB Vmem. For DSV3-MLA (~30 KB/token) at TP=8, batch=4, seq=1024,
+    // KV per chip = 30 KB × 4 × 1024 / 8 ≈ 15 MB — well within 384 MB SRAM.
+    // Expect TPU 8i decode to be measurably faster than a counter-factual no-SRAM variant.
+    let tpu = GpuSpec::preset("tpu-v8i").unwrap();
+    assert_eq!(tpu.on_chip_sram, 384_000_000);
+
+    let mut tpu_no_sram = tpu.clone();
+    tpu_no_sram.on_chip_sram = 0;
+
+    let model = LlmConfig::preset("deepseek-v3").unwrap();
+    let mut c = ClusterConfig::single_gpu();
+    c.tp = 8;
+    c.ep = 8;
+    c.nvlink_bw = tpu.nvlink_bandwidth;
+
+    let with_sram = tpu.decode_latency(4, 1024, &model, None, &c);
+    let no_sram = tpu_no_sram.decode_latency(4, 1024, &model, None, &c);
+
+    assert!(
+        with_sram < no_sram,
+        "SRAM should reduce decode latency when KV fits ({:.3} ms vs {:.3} ms)",
+        with_sram * 1000.0,
+        no_sram * 1000.0
+    );
+}
+
+#[test]
+fn sram_no_benefit_when_kv_doesnt_fit() {
+    // For large batch × long-context MHA (e.g. llama-70b at batch=32, seq=4096), KV per chip
+    // is hundreds of MB — exceeds even TPU 8i's 384 MB SRAM. Latency should match no-SRAM case.
+    let tpu = GpuSpec::preset("tpu-v8i").unwrap();
+    let mut tpu_no_sram = tpu.clone();
+    tpu_no_sram.on_chip_sram = 0;
+
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let mut c = ClusterConfig::single_gpu();
+    c.tp = 4;
+    c.nvlink_bw = tpu.nvlink_bandwidth;
+
+    // batch=64, seq=4096: KV per chip = 160 KB × 64 × 4096 / 4 ≈ 10 GB, way over SRAM.
+    let with_sram = tpu.decode_latency(64, 4096, &model, None, &c);
+    let no_sram = tpu_no_sram.decode_latency(64, 4096, &model, None, &c);
+
+    assert!(
+        (with_sram - no_sram).abs() < 1e-9,
+        "Latencies should be identical when KV exceeds SRAM"
+    );
+}
+
+#[test]
 fn tpu_ironwood_has_fp8_and_torus_ici() {
     let tpu = GpuSpec::preset("tpu-v7-ironwood").unwrap();
     assert!(tpu.flops_fp8 > 0.0, "Ironwood has FP8 tensor cores");

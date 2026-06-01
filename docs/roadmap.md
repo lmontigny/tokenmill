@@ -14,4 +14,5 @@
 | 10 | ✅ | B200 Blackwell GPU preset, public trace fetcher (Azure / BurstGPT / Mooncake), library exports + tests, CI |
 | 11 | ✅ | AMD Instinct presets — MI300X (CDNA 3, 192 GB HBM3), MI325X (CDNA 3 refresh, 256 GB HBM3e), MI355X (CDNA 4, B200 competitor). Infinity Fabric reuses the scale-up fabric formulas. |
 | 12 | ✅ | Frontier-class model presets — Kimi K2 (1.026 T MoE, 384 experts, MLA KV) and Llama 4 Behemoth (2 T MoE, 16 huge experts). Demonstrates that the simulator handles trillion-param clusters. |
-| 13 | ✅ | Google TPU presets — v7 Ironwood (2025) and v8i (2026, projected). ICI 3D-torus modelled as the scale-up fabric; ring-allreduce formula reused (correct for TP groups laid out along one torus dimension). |
+| 13 | ✅ | Google TPU presets — v7 Ironwood (2025), v8t (training, 3D torus), v8i (serving, Boardfly). Official 8t/8i specs from Google Cloud blog; FP8/BF16 derived from FP4. |
+| 14 | ✅ | On-chip SRAM modelling — `on_chip_sram` field on `GpuSpec`. When per-chip KV fits in SRAM, decode KV traffic is served at 1/10 the HBM cost. Captures the TPU 8i 384 MB Vmem advantage on low-latency serving. |

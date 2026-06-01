@@ -61,12 +61,14 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 | `mi355x` | AMD CDNA 4 | 2500 | 5000 | 288 GB | 8 TB/s | 1.075 TB/s (IF Gen 4) |
 | `mi325x` | AMD CDNA 3 refresh | 1307 | 2614 | 256 GB | 6 TB/s | 896 GB/s (Infinity Fabric) |
 | `mi300x` | AMD CDNA 3 | 1307 | 2614 | 192 GB | 5.3 TB/s | 896 GB/s (Infinity Fabric) |
-| `tpu-v8i` | Google TPU 8i (2026, serving) | 2525 ‡ | 5050 ‡ | 288 GB | 8.6 TB/s | 2.4 TB/s (ICI, **Boardfly**) |
-| `tpu-v8t` | Google TPU 8t (2026, training) | 3150 ‡ | 6300 ‡ | 216 GB | 6.5 TB/s | 2.4 TB/s (ICI, 3D-torus) |
-| `tpu-v7-ironwood` | Google TPU v7 (Apr 2025) | 2304 | 4614 | 192 GB | 7.37 TB/s | 1.2 TB/s (ICI, 3D-torus) |
+| `tpu-v8i` | Google TPU 8i (2026, serving) | 2525 ‡ | 5050 ‡ | 288 GB | 8.6 TB/s | 2.4 TB/s (ICI, **Boardfly**) — **384 MB on-chip SRAM** |
+| `tpu-v8t` | Google TPU 8t (2026, training) | 3150 ‡ | 6300 ‡ | 216 GB | 6.5 TB/s | 2.4 TB/s (ICI, 3D-torus) — 128 MB SRAM |
+| `tpu-v7-ironwood` | Google TPU v7 (Apr 2025) | 2304 | 4614 | 192 GB | 7.37 TB/s | 1.2 TB/s (ICI, 3D-torus) — ~256 MB SRAM |
 
 ‡ TPU 8i / 8t BF16 and FP8 figures are **derived** from the published FP4 PFLOPs (10.1 and 12.6 respectively) using the standard 2× per-precision ratio. Google publishes only FP4. [Source.](https://cloud.google.com/blog/products/compute/tpu-8t-and-tpu-8i-technical-deep-dive)
 
 The `nvlink_bandwidth` field is treated as a generic **scale-up fabric** bandwidth — Infinity Fabric (AMD) and ICI (TPU) reuse the same all-reduce / all-to-all formulas.
+
+**On-chip SRAM**: each preset carries an `on_chip_sram` value (L2 cache on NVIDIA/AMD, Vmem scratchpad on TPU). When the per-chip KV working set fits in this budget, decode KV traffic is served from SRAM at ~10× HBM cost. This is the main reason TPU 8i (384 MB Vmem) outperforms B200 (≈100 MB L2) on standard MHA/GQA models at small-to-moderate batch even though their HBM bandwidths are similar.
 
 **TPU topology caveat**: TPU 8t uses a 3D-torus ICI; TPU 8i introduces **Boardfly** — a Dragonfly-inspired hierarchical fabric (4-chip building blocks → 8-board copper-connected groups of 32 chips → 36 groups linked via Optical Circuit Switches, up to 1024 chips/pod, 7-hop diameter). The simulator's ring-allreduce formula is accurate for TP ≤ 32 (within a Boardfly group); for larger TP that crosses the OCS layer it under-estimates collective cost by ~10–20%. The on-chip CAE (Collectives Acceleration Engine) on 8i further accelerates all-reduce / all-to-all but is not separately modelled. Within-pod only — no DCN.

@@ -13,6 +13,13 @@ pub struct GpuSpec {
     pub flops_fp8: f64, // peak FP8 FLOPS (e.g. 1978e12 for H100; 0 = same as bf16)
     pub hbm_bandwidth: f64, // bytes/sec (e.g. 3.35e12 for H100)
     pub hbm_capacity: u64, // bytes
+    /// On-chip SRAM per accelerator (L2 cache on NVIDIA/AMD, Vmem scratchpad on TPU).
+    /// When the per-chip KV working set fits in this budget, decode KV traffic is
+    /// largely served from SRAM (~10× faster than HBM) instead of HBM. This is a
+    /// major TPU 8i advantage at 384 MB vs ~50-100 MB on contemporary GPUs.
+    /// Default 0 disables SRAM caching (conservative, equivalent to old behaviour).
+    #[serde(default)]
+    pub on_chip_sram: u64,
     pub nvlink_bandwidth: f64, // bytes/sec per direction
     pub mfu_prefill: f64,
     pub mfu_decode: f64,
@@ -150,6 +157,11 @@ impl GpuSpec {
     /// Decode roofline: memory-BW bound — load active weights + KV per request.
     /// With EP: expert weights split by EP; attention weights and KV split by TP.
     /// Returns per-TP-group latency (already accounts for parallelism).
+    ///
+    /// On-chip SRAM: when the per-chip KV footprint fits in `on_chip_sram`, KV
+    /// traffic is served from SRAM (~10× faster than HBM in practice). We model
+    /// this by counting SRAM-resident bytes at 1/10 the HBM cost. Weights are
+    /// orders of magnitude larger than any SRAM and always hit HBM.
     fn roofline_decode(
         &self,
         batch: u32,
@@ -159,14 +171,25 @@ impl GpuSpec {
         ep: u32,
     ) -> f64 {
         let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
-        let bytes_per_gpu = if ep > 1 && model.is_moe() {
+        let kv_bytes_per_chip = kv_bytes / tp as u64;
+
+        let weight_bytes_per_chip = if ep > 1 && model.is_moe() {
             let expert_bytes = model.expert_weight_bytes_active();
             let other_bytes = model.weight_bytes_active().saturating_sub(expert_bytes);
-            // Attention + dense FFN + KV → split by TP; expert weights → split by EP.
-            other_bytes / tp as u64 + expert_bytes / ep as u64 + kv_bytes / tp as u64
+            other_bytes / tp as u64 + expert_bytes / ep as u64
         } else {
-            (model.weight_bytes_active() + kv_bytes) / tp as u64
+            model.weight_bytes_active() / tp as u64
         };
+
+        // SRAM benefit: if the per-chip KV fits in on-chip SRAM, it costs ~1/10 of HBM.
+        let kv_effective_bytes = if self.on_chip_sram > 0 && kv_bytes_per_chip <= self.on_chip_sram
+        {
+            kv_bytes_per_chip / 10
+        } else {
+            kv_bytes_per_chip
+        };
+
+        let bytes_per_gpu = weight_bytes_per_chip + kv_effective_bytes;
         bytes_per_gpu as f64 / (self.hbm_bandwidth * self.mfu_decode)
     }
 
@@ -179,6 +202,7 @@ impl GpuSpec {
                 flops_fp8: 4500e12,            // 4.5 PFLOPS dense FP8 (2× H100)
                 hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e (2.4× H100)
                 hbm_capacity: 192_000_000_000, // 192 GB HBM3e
+                on_chip_sram: 100_000_000,     // ~100 MB L2 (estimate)
                 nvlink_bandwidth: 1800e9,      // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
                 mfu_prefill: 0.70, // slightly lower than H100 — new gen, real-world kernels less mature
                 mfu_decode: 0.75,
@@ -189,6 +213,7 @@ impl GpuSpec {
                 flops_fp8: 1978e12,
                 hbm_bandwidth: 3.35e12,
                 hbm_capacity: 80_000_000_000,
+                on_chip_sram: 50_000_000, // 50 MB L2
                 nvlink_bandwidth: 900e9,
                 mfu_prefill: 0.75,
                 mfu_decode: 0.80,
@@ -199,6 +224,7 @@ impl GpuSpec {
                 flops_fp8: 0.0, // A100 does not have FP8 tensor cores
                 hbm_bandwidth: 2.0e12,
                 hbm_capacity: 80_000_000_000,
+                on_chip_sram: 40_000_000, // 40 MB L2
                 nvlink_bandwidth: 600e9,
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
@@ -223,9 +249,10 @@ impl GpuSpec {
                 flops_fp8: 5050e12,      // FP4 / 2 = 5.05 PFLOPS FP8 (derived)
                 hbm_bandwidth: 8.601e12, // 8601 GB/s — official
                 hbm_capacity: 288_000_000_000, // 288 GB — official
+                on_chip_sram: 384_000_000, // 384 MB Vmem — official, 3× TPU 8t
                 nvlink_bandwidth: 2400e9, // ICI ~2.4 TB/s aggregate (2× v7 Ironwood per blog)
                 mfu_prefill: 0.72,
-                mfu_decode: 0.80, // 384 MB on-chip SRAM + CAE → strong decode efficiency
+                mfu_decode: 0.80, // CAE + huge Vmem → strong decode efficiency
             }),
             // Google TPU 8t (2026, training-focused). 3D torus, 9600-chip superpod. Same FP4-derivation.
             "tpu-v8t" => Some(Self {
@@ -234,6 +261,7 @@ impl GpuSpec {
                 flops_fp8: 6300e12,      // FP4 / 2 = 6.3 PFLOPS FP8 (derived)
                 hbm_bandwidth: 6.528e12, // 6528 GB/s — official
                 hbm_capacity: 216_000_000_000, // 216 GB — official
+                on_chip_sram: 128_000_000, // 128 MB Vmem — official
                 nvlink_bandwidth: 2400e9, // ICI 2× v7 Ironwood (blog: "2x scale-up bandwidth")
                 mfu_prefill: 0.70,
                 mfu_decode: 0.75,
@@ -245,7 +273,8 @@ impl GpuSpec {
                 flops_fp8: 4614e12,
                 hbm_bandwidth: 7.37e12,
                 hbm_capacity: 192_000_000_000,
-                nvlink_bandwidth: 1200e9, // ICI ~1.2 TB/s aggregate
+                on_chip_sram: 256_000_000, // ~256 MB Vmem (estimate; between v5p and 8t)
+                nvlink_bandwidth: 1200e9,  // ICI ~1.2 TB/s aggregate
                 mfu_prefill: 0.70,
                 mfu_decode: 0.75,
             }),
@@ -258,6 +287,7 @@ impl GpuSpec {
                 flops_fp8: 2614e12,            // 2.614 PFLOPS FP8 matrix (dense)
                 hbm_bandwidth: 5.3e12,         // 5.3 TB/s HBM3 (1.58× H100)
                 hbm_capacity: 192_000_000_000, // 192 GB HBM3
+                on_chip_sram: 256_000_000,     // ~256 MB Infinity Cache + L2
                 nvlink_bandwidth: 896e9,       // Infinity Fabric: 896 GB/s aggregate per GPU
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
@@ -269,6 +299,7 @@ impl GpuSpec {
                 flops_fp8: 2614e12,
                 hbm_bandwidth: 6.0e12,         // 6.0 TB/s HBM3e
                 hbm_capacity: 256_000_000_000, // 256 GB HBM3e
+                on_chip_sram: 256_000_000,
                 nvlink_bandwidth: 896e9,
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
@@ -280,7 +311,8 @@ impl GpuSpec {
                 flops_fp8: 5000e12,            // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
                 hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e
                 hbm_capacity: 288_000_000_000, // 288 GB HBM3e (50% more than B200)
-                nvlink_bandwidth: 1075e9,      // Infinity Fabric Gen 4: 1.075 TB/s
+                on_chip_sram: 256_000_000,
+                nvlink_bandwidth: 1075e9, // Infinity Fabric Gen 4: 1.075 TB/s
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -290,6 +322,7 @@ impl GpuSpec {
                 flops_fp8: 0.0, // A10G does not have FP8 tensor cores
                 hbm_bandwidth: 600e9,
                 hbm_capacity: 24_000_000_000,
+                on_chip_sram: 6_000_000, // 6 MB L2
                 nvlink_bandwidth: 0.0,
                 mfu_prefill: 0.55,
                 mfu_decode: 0.65,

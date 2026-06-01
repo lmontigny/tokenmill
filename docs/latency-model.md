@@ -9,6 +9,13 @@ With `--kernel-table`: table lookup with linear interpolation on seq_len, roofli
 instead of `flops_bf16`. Decode is memory-BW bound regardless of dtype — the speedup there comes from
 loading half as many bytes (FP8 weight bytes = BF16/2).
 
+**On-chip SRAM (`on_chip_sram`)**: in the decode roofline, if the per-chip KV working set (KV bytes ÷ TP)
+fits in SRAM, those bytes are counted at **1/10** the HBM cost. The benefit is biggest for low-latency
+serving on TPU 8i (384 MB Vmem), where KV cache of small/moderate-batch workloads stays on-chip and the
+chip approaches its compute-not-memory regime. Weights are orders of magnitude larger than any on-chip
+SRAM and always hit HBM. Set `on_chip_sram = 0` in a preset to disable this model and recover the
+HBM-only behaviour.
+
 To improve accuracy, add rows to `data/kernel_table.csv` from your own profiling.
 CSV format: `gpu,model,op,batch_size,seq_len,latency_ms`.
 
