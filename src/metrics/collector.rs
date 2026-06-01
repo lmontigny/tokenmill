@@ -137,7 +137,7 @@ impl MetricsCollector {
         let throughput = self.completions as f64 / self.sim_duration.max(1e-9);
         let tok_throughput = self.tokens_generated as f64 / self.sim_duration.max(1e-9);
 
-        println!("=== inference-sim results ===");
+        println!("=== tokenmill results ===");
         println!("Requests completed : {}", self.completions);
         println!("Throughput         : {:.2} req/s", throughput);
         println!("Token throughput   : {:.0} tok/s", tok_throughput);

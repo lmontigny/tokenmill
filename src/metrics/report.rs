@@ -40,7 +40,7 @@ pub struct RunSummary {
 
 impl RunSummary {
     pub fn print_text(&self) {
-        println!("=== inference-sim results ===");
+        println!("=== tokenmill results ===");
         println!("Requests completed : {}", self.completions);
         if self.preemptions > 0 {
             println!("Preemptions        : {}", self.preemptions);

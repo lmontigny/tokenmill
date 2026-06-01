@@ -3,23 +3,20 @@ use std::path::Path;
 use clap::Parser;
 use rayon::prelude::*;
 
-use inference_sim::engine::sim::{MtpConfig, SchedulerKind, Simulator, SpecConfig};
-use inference_sim::hardware::cluster::ClusterConfig;
-use inference_sim::hardware::gpu::{GpuSpec, GpuState};
-use inference_sim::hardware::kernel_table::KernelTable;
-use inference_sim::metrics::report::RunSummary;
-use inference_sim::model::kv_cache::KvCacheManager;
-use inference_sim::model::llm_config::LlmConfig;
-use inference_sim::scheduler::chunked_prefill::ChunkedPrefillScheduler;
-use inference_sim::scheduler::continuous_batch::ContinuousBatchScheduler;
-use inference_sim::workload::synthetic::SyntheticWorkload;
-use inference_sim::workload::trace_replay::TraceReplay;
+use tokenmill::engine::sim::{MtpConfig, SchedulerKind, Simulator, SpecConfig};
+use tokenmill::hardware::cluster::ClusterConfig;
+use tokenmill::hardware::gpu::{GpuSpec, GpuState};
+use tokenmill::hardware::kernel_table::KernelTable;
+use tokenmill::metrics::report::RunSummary;
+use tokenmill::model::kv_cache::KvCacheManager;
+use tokenmill::model::llm_config::LlmConfig;
+use tokenmill::scheduler::chunked_prefill::ChunkedPrefillScheduler;
+use tokenmill::scheduler::continuous_batch::ContinuousBatchScheduler;
+use tokenmill::workload::synthetic::SyntheticWorkload;
+use tokenmill::workload::trace_replay::TraceReplay;
 
 #[derive(Parser, Debug, Clone)]
-#[command(
-    name = "inference-sim",
-    about = "LLM inference discrete-event simulator"
-)]
+#[command(name = "tokenmill", about = "LLM inference discrete-event simulator")]
 struct Args {
     /// GPU preset: b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x
     #[arg(long, default_value = "h100")]

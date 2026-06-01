@@ -4,9 +4,9 @@
 //! verifies the scaling behaviour we rely on (FP8 dispatch, TP scaling,
 //! all-reduce overhead).
 
-use inference_sim::hardware::cluster::ClusterConfig;
-use inference_sim::hardware::gpu::GpuSpec;
-use inference_sim::model::llm_config::LlmConfig;
+use tokenmill::hardware::cluster::ClusterConfig;
+use tokenmill::hardware::gpu::GpuSpec;
+use tokenmill::model::llm_config::LlmConfig;
 
 fn close(actual: f64, expected: f64, rel_tol: f64) -> bool {
     (actual - expected).abs() / expected.abs() <= rel_tol

@@ -1,4 +1,4 @@
-# Kernel execution time table for inference-sim.
+# Kernel execution time table for tokenmill.
 # op=prefill: seq_len = prompt chunk tokens, batch_size = requests in chunk.
 # op=decode:  seq_len = avg KV context length, batch_size = concurrent decode requests.
 # latency_ms = single-GPU-equivalent wall-clock time (before TP division).

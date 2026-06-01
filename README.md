@@ -1,4 +1,4 @@
-# inference-sim
+# tokenmill
 
 Discrete-event simulator for LLM inference workloads, written in Rust.
 

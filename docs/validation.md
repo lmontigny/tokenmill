@@ -3,7 +3,7 @@
 Run the roofline model against reference kernel latencies:
 
 ```bash
-./target/release/inference-sim --validate-kernels data/reference_kernels.csv
+./target/release/tokenmill --validate-kernels data/reference_kernels.csv
 ```
 
 Results against `data/reference_kernels.csv` (GPU kernel time only; serving frameworks add 3–10 ms overhead):

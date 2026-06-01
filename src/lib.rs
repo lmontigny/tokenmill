@@ -1,4 +1,4 @@
-//! inference-sim — discrete-event simulator for LLM inference workloads.
+//! tokenmill — discrete-event simulator for LLM inference workloads.
 //!
 //! The binary CLI lives in `main.rs`; this lib.rs exists so integration tests
 //! under `tests/` (and downstream tooling) can pull in the same modules.

@@ -1,7 +1,7 @@
 //! Speculative decoding and multi-token prediction math.
 
-use inference_sim::engine::sim::{MtpConfig, SpecConfig};
-use inference_sim::model::llm_config::LlmConfig;
+use tokenmill::engine::sim::{MtpConfig, SpecConfig};
+use tokenmill::model::llm_config::LlmConfig;
 
 fn close(actual: f64, expected: f64, tol: f64) -> bool {
     (actual - expected).abs() <= tol

@@ -45,7 +45,7 @@ jobs:
       - name: Smoke simulation run
         run: |
           cargo build --release
-          ./target/release/inference-sim \
+          ./target/release/tokenmill \
             --model llama-8b --gpu h100 \
             --scheduler chunked-prefill \
             --arrival-rate 5 --duration 10

@@ -24,7 +24,7 @@ Run `bash scripts/fetch_traces.sh` to download and normalise the traces below in
 Example:
 ```bash
 bash scripts/fetch_traces.sh mooncake
-./target/release/inference-sim \
+./target/release/tokenmill \
   --model llama-70b-fp8 --gpu h100 --tp 4 \
   --workload trace:data/traces/mooncake_conversation.csv \
   --duration 300

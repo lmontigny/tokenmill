@@ -1,8 +1,8 @@
 //! MoE accuracy model — active params, MLA KV compression, expert weight maths.
 
-use inference_sim::hardware::cluster::ClusterConfig;
-use inference_sim::hardware::gpu::GpuSpec;
-use inference_sim::model::llm_config::LlmConfig;
+use tokenmill::hardware::cluster::ClusterConfig;
+use tokenmill::hardware::gpu::GpuSpec;
+use tokenmill::model::llm_config::LlmConfig;
 
 #[test]
 fn dense_models_have_full_active_param_fraction() {
