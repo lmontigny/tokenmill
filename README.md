@@ -7,6 +7,30 @@ tensor parallelism, pipeline parallelism, disaggregated prefill/decode,
 speculative decoding, and multi-token prediction.
 Targets **~10% error** vs real GPU hardware.
 
+## Example results
+
+Simulated results for various model/GPU/scheduler configurations (60 s runs, log-normal prompts μ=512 tokens, outputs μ=128 tokens).
+
+| # | Model | GPU / TP | Scheduler | Rate (req/s) | Thrpt (rps) | TTFT p50 | TTFT p95 | TPOT p50 | Notes |
+|---|-------|----------|-----------|:---:|:---:|---:|---:|---:|---|
+| 1 | llama-8b-fp8 | H100 TP=1 | continuous-batch | 10 | 9.9 | 13 ms | 23 ms | 3.2 ms | Light-load baseline |
+| 2 | llama-8b-fp8 | H100 TP=1 | continuous-batch | 50 | 45.0 | **2435 ms** | 6451 ms | 2.0 ms | Saturated — TTFT collapses as prefill starves |
+| 3 | llama-8b-fp8 | H100 TP=1 | chunked-prefill | 50 | **50.4** | **21 ms** | 38 ms | 4.5 ms | Chunked-prefill absorbs full load; TTFT stays bounded |
+| 4 | llama-8b-fp8 | H100 TP=1 | chunked-prefill + spec K=3 γ=0.75 | 30 | 30.5 | 17 ms | 31 ms | **1.3 ms** | Spec decoding: −24% TPOT vs 1.7 ms baseline (row below) |
+| 5 | llama-8b-fp8 | H100 TP=1 | chunked-prefill (baseline) | 30 | 30.5 | 21 ms | 36 ms | 1.7 ms | Baseline for row 4 comparison |
+| 6 | llama-8b-fp8 | H100 TP=2 disagg | continuous-batch | 50 | 50.7 | 21 ms | 257 ms | **1.6 ms** | Disaggregated P/D: decode isolated, fast TPOT |
+| 7 | llama-70b (bf16) | H100 TP=4 | continuous-batch | 5 | 5.1 | 178 ms | **1582 ms** | 15.2 ms | 70B BF16: p95 TTFT blows out under CB |
+| 8 | llama-70b (bf16) | H100 TP=4 | chunked-prefill | 5 | 5.1 | 71 ms | **123 ms** | 15.2 ms | Chunked-prefill trims p95 TTFT 13× vs row 7 |
+| 9 | llama-70b-fp8 | H100 TP=4 | chunked-prefill | 5 | 5.2 | **30 ms** | 55 ms | 7.0 ms | FP8: 2.4× lower TTFT and TPOT vs BF16 (row 8) |
+| 10 | mixtral-8x7b | H100 EP=4 | chunked-prefill | 8 | 7.8 | 29 ms | 52 ms | 6.5 ms | 47 B MoE — expert weights sharded across 4 GPUs |
+| 11 | deepseek-v3 | H100 TP=8 EP=8 | chunked-prefill | 3 | 3.2 | 7 ms | 13 ms | 1.7 ms | 671 B MoE / MLA KV — 9 active experts per token |
+
+Key patterns:
+- **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.
+- **Rows 7 vs 8 vs 9**: for a 70B model, chunked-prefill cuts p95 TTFT 13×; switching from BF16 to FP8 cuts it another 2.4×.
+- **Row 4**: speculative decoding (`--spec-tokens 3`) reduces TPOT by 24% at the same throughput.
+- **Row 11**: DeepSeek V3 (671 B) on 8×H100 with EP=8 serves at 1.7 ms TPOT — MLA KV compression keeps the KV footprint tiny.
+
 ## Build
 
 ```bash
