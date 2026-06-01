@@ -1,4 +1,4 @@
-use crate::workload::request::{InferenceRequest, RequestState};
+use crate::workload::request::{InferenceRequest, RequestPhase, RequestState};
 
 pub struct ChunkedBatchDecision {
     /// Requests newly admitted this tick, paired with how many tokens to prefill first.
@@ -27,6 +27,16 @@ impl ChunkedPrefillScheduler {
         kv_block_size: u32,
         _now: f64,
     ) -> ChunkedBatchDecision {
+        // Preempt largest decode request when KV is fully exhausted.
+        if kv_free_blocks == 0 && !waiting.is_empty() {
+            if let Some(victim) = running.iter()
+                .filter(|s| matches!(s.phase, RequestPhase::Decoding))
+                .max_by_key(|s| s.req.prompt_tokens + s.req.max_output_tokens)
+            {
+                return ChunkedBatchDecision { admit: vec![], preempt: vec![victim.req.req_id] };
+            }
+        }
+
         // Token budget split: reserve half for decode, half for prefill chunks.
         let decode_tokens: u32 = running.len() as u32; // 1 token per running req per step
         let prefill_budget = self.max_batch_tokens.saturating_sub(decode_tokens);

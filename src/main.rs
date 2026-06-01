@@ -10,7 +10,7 @@ use std::path::Path;
 use clap::Parser;
 use rayon::prelude::*;
 
-use engine::sim::{Simulator, SchedulerKind};
+use engine::sim::{Simulator, SchedulerKind, SpecConfig};
 use hardware::cluster::ClusterConfig;
 use hardware::gpu::{GpuSpec, GpuState};
 use hardware::kernel_table::KernelTable;
@@ -104,6 +104,18 @@ struct Args {
     /// Sweep over arrival rates (comma-separated, e.g. 1,5,10,20). Runs in parallel.
     #[arg(long)]
     sweep_arrival_rates: Option<String>,
+
+    /// Speculative decoding: number of draft tokens per step (0 = disabled)
+    #[arg(long, default_value_t = 0)]
+    spec_tokens: u32,
+
+    /// Speculative decoding: per-token acceptance rate γ (0.0–1.0)
+    #[arg(long, default_value_t = 0.7)]
+    spec_acceptance_rate: f64,
+
+    /// Draft model preset for speculative decoding (e.g. llama-8b when main is llama-70b)
+    #[arg(long)]
+    draft_model: Option<String>,
 
     /// Random seed
     #[arg(long, default_value_t = 42)]
@@ -257,6 +269,16 @@ fn print_model_card(args: &Args) {
             args.ep,
             (model.n_experts / args.ep).max(1));
     }
+    if args.spec_tokens > 0 {
+        let draft_name = args.draft_model.as_deref().unwrap_or("auto (1/10 main model)");
+        let expected_tok = {
+            let k = args.spec_tokens as f64;
+            let g = args.spec_acceptance_rate.clamp(0.0, 1.0 - 1e-9);
+            (1.0 - g.powf(k + 1.0)) / (1.0 - g)
+        };
+        println!("  Spec decode    K={}  γ={:.2}  draft={}  → {:.2} tok/step expected",
+            args.spec_tokens, args.spec_acceptance_rate, draft_name, expected_tok);
+    }
 
     println!("{}", sep);
     println!();
@@ -323,6 +345,29 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
     let kv = KvCacheManager::new(kv_total_blocks, args.kv_block_size);
     let latency_mode = if kt.is_some() { "kernel-table+roofline" } else { "roofline" };
 
+    let spec = if args.spec_tokens > 0 {
+        let draft = match args.draft_model.as_deref()
+            .and_then(LlmConfig::preset)
+        {
+            Some(m) => m,
+            None => {
+                // No draft model specified: synthesise one at 1/10 the weight size of the main model.
+                let mut d = model.clone();
+                d.name = format!("{}-draft", d.name);
+                d.weight_bytes = (d.weight_bytes / 10).max(1);
+                d.active_weight_bytes = (d.active_weight_bytes / 10).max(if d.active_weight_bytes > 0 { 1 } else { 0 });
+                d
+            }
+        };
+        Some(SpecConfig {
+            draft_tokens: args.spec_tokens,
+            acceptance_rate: args.spec_acceptance_rate,
+            draft_model: draft,
+        })
+    } else {
+        None
+    };
+
     let mut sim = if args.workload.starts_with("trace:") {
         let path = &args.workload["trace:".len()..];
         let mut trace = TraceReplay::from_csv(Path::new(path))
@@ -332,6 +377,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         let mut w = SyntheticWorkload::new(arrival_rate, args.prompt_mean, args.output_mean, args.duration, args.seed);
         Simulator::new(prefill_gpu, decode_gpu, model.clone(), cluster, scheduler, &mut w, kv)
     };
+    if let Some(s) = spec { sim = sim.with_spec(s); }
 
     sim.run(args.duration);
 

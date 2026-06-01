@@ -16,6 +16,7 @@ pub struct RunSummary {
 
     // results
     pub completions: u64,
+    pub preemptions: u64,
     pub throughput_rps: f64,
     pub token_throughput: f64,
     pub kv_util_mean_pct: f64,
@@ -41,6 +42,9 @@ impl RunSummary {
     pub fn print_text(&self) {
         println!("=== inference-sim results ===");
         println!("Requests completed : {}", self.completions);
+        if self.preemptions > 0 {
+            println!("Preemptions        : {}", self.preemptions);
+        }
         println!("Throughput         : {:.2} req/s", self.throughput_rps);
         println!("Token throughput   : {:.0} tok/s", self.token_throughput);
         println!("KV utilization     : mean={:.1}%", self.kv_util_mean_pct);

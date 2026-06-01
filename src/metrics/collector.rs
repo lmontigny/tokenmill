@@ -9,6 +9,7 @@ pub struct MetricsCollector {
     tpot: Histogram<u64>,           // microseconds
     pub completions: u64,
     pub tokens_generated: u64,
+    pub preemptions: u64,
     pub sim_duration: f64,
     kv_util_sum: f64,
     kv_util_samples: u64,
@@ -25,6 +26,7 @@ impl MetricsCollector {
             tpot: Histogram::new(3).unwrap(),
             completions: 0,
             tokens_generated: 0,
+            preemptions: 0,
             sim_duration: 0.0,
             kv_util_sum: 0.0,
             kv_util_samples: 0,
@@ -56,6 +58,10 @@ impl MetricsCollector {
         self.tokens_generated += output_tokens as u64;
     }
 
+    pub fn record_preemption(&mut self) {
+        self.preemptions += 1;
+    }
+
     pub fn record_kv_util(&mut self, util: f64) {
         self.kv_util_sum += util;
         self.kv_util_samples += 1;
@@ -78,6 +84,7 @@ impl MetricsCollector {
             tp, pp, disaggregate, arrival_rate, duration_s: self.sim_duration,
             latency_mode: latency_mode.into(),
             completions: self.completions,
+            preemptions: self.preemptions,
             throughput_rps: throughput,
             token_throughput: tok_throughput,
             kv_util_mean_pct: self.kv_util_mean() * 100.0,

@@ -18,6 +18,29 @@ pub enum SchedulerKind {
     Chunked(ChunkedPrefillScheduler),
 }
 
+/// Speculative decoding configuration.
+///
+/// Each decode "step" runs K draft tokens through a small model, then verifies
+/// with the main model in one pass. Expected tokens produced per step:
+///   E[tokens] = (1 − γ^{K+1}) / (1 − γ)
+/// where γ is the per-token acceptance rate (empirically 0.6–0.8 for domain-matched drafts).
+pub struct SpecConfig {
+    /// Number of draft tokens to speculate per step (K).
+    pub draft_tokens: u32,
+    /// Per-token acceptance probability (γ).
+    pub acceptance_rate: f64,
+    /// Draft model — runs on the same GPU as the main model.
+    pub draft_model: LlmConfig,
+}
+
+impl SpecConfig {
+    pub fn tokens_per_step(&self) -> f64 {
+        let k = self.draft_tokens as f64;
+        let g = self.acceptance_rate.clamp(0.0, 1.0 - 1e-9);
+        (1.0 - g.powf(k + 1.0)) / (1.0 - g)
+    }
+}
+
 pub struct Simulator {
     pub clock: SimTime,
     queue: SimQueue,
@@ -31,6 +54,7 @@ pub struct Simulator {
     scheduler: SchedulerKind,
     pub metrics: MetricsCollector,
     kv: KvCacheManager,
+    spec: Option<SpecConfig>,
 
     waiting: Vec<InferenceRequest>,
     prefilling: FxHashMap<u64, RequestState>,
@@ -71,6 +95,7 @@ impl Simulator {
             scheduler,
             metrics,
             kv,
+            spec: None,
             waiting: Vec::new(),
             prefilling: FxHashMap::default(),
             decoding: FxHashMap::default(),
@@ -78,6 +103,11 @@ impl Simulator {
             prefill_progress: FxHashMap::default(),
             decode_scheduled: false,
         }
+    }
+
+    pub fn with_spec(mut self, spec: SpecConfig) -> Self {
+        self.spec = Some(spec);
+        self
     }
 
     pub fn run(&mut self, until: SimTime) {
@@ -146,24 +176,57 @@ impl Simulator {
 
         match &self.scheduler {
             SchedulerKind::Continuous(_) => {
-                let admit = if let SchedulerKind::Continuous(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock).admit
+                let decision = if let SchedulerKind::Continuous(s) = &self.scheduler {
+                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock)
                 } else { unreachable!() };
-                for req_id in admit {
+                let had_preemptions = !decision.preempt.is_empty();
+                for req_id in decision.preempt {
+                    self.handle_preemption(req_id);
+                }
+                if had_preemptions {
+                    // Re-tick immediately so newly freed KV is used.
+                    new_events.push((self.clock, EventPayload::SchedulerTick));
+                }
+                for req_id in decision.admit {
                     new_events.extend(self.admit_request(req_id, None));
                 }
             }
             SchedulerKind::Chunked(_) => {
-                let admit = if let SchedulerKind::Chunked(s) = &self.scheduler {
-                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock).admit
+                let decision = if let SchedulerKind::Chunked(s) = &self.scheduler {
+                    s.schedule(&self.waiting, &running, self.kv.free_blocks, self.kv.block_size, self.clock)
                 } else { unreachable!() };
-                for (req_id, chunk) in admit {
+                let had_preemptions = !decision.preempt.is_empty();
+                for req_id in decision.preempt {
+                    self.handle_preemption(req_id);
+                }
+                if had_preemptions {
+                    new_events.push((self.clock, EventPayload::SchedulerTick));
+                }
+                for (req_id, chunk) in decision.admit {
                     new_events.extend(self.admit_request(req_id, Some(chunk)));
                 }
             }
         }
 
         new_events
+    }
+
+    /// Evict a request from decode/prefill: free KV, push req back to front of waiting queue.
+    /// The request will re-prefill from scratch on next admission (recompute strategy).
+    fn handle_preemption(&mut self, req_id: u64) {
+        let req = if let Some((state, _)) = self.decoding.remove(&req_id) {
+            state.req
+        } else if let Some(state) = self.prefilling.remove(&req_id) {
+            self.prefill_progress.remove(&req_id);
+            state.req
+        } else {
+            return;
+        };
+        self.kv.free(req_id);
+        self.metrics.record_preemption();
+        self.metrics.record_kv_util(self.kv.utilization());
+        // Re-insert at front so the request is re-scheduled promptly (LIFO policy).
+        self.waiting.insert(0, req);
     }
 
     fn admit_request(&mut self, req_id: u64, chunk: Option<u32>) -> Vec<(SimTime, EventPayload)> {
@@ -254,7 +317,8 @@ impl Simulator {
         // We schedule a zero-cost "transfer done" by re-using SchedulerTick after the delay,
         // but it's cleaner to inline: push a BatchDecodeStep timed at done_time.
         // First move the state out of transferring into decoding.
-        if let Some(state) = self.transferring.remove(&req_id) {
+        if let Some(mut state) = self.transferring.remove(&req_id) {
+            state.phase = RequestPhase::Decoding;
             self.decoding.insert(req_id, (state, 0));
         }
 
@@ -267,7 +331,8 @@ impl Simulator {
     }
 
     fn move_to_decoding(&mut self, req_id: u64) -> Vec<(SimTime, EventPayload)> {
-        if let Some(state) = self.prefilling.remove(&req_id) {
+        if let Some(mut state) = self.prefilling.remove(&req_id) {
+            state.phase = RequestPhase::Decoding;
             self.decoding.insert(req_id, (state, 0));
         }
         if !self.decode_scheduled {
@@ -288,18 +353,31 @@ impl Simulator {
             total / batch_size.max(1)
         };
 
-        // Use decode GPU's kernel table if available (may differ from prefill GPU in disagg mode).
+        // Use decode GPU spec and kernel table (may differ from prefill GPU in disagg mode).
+        let decode_spec = self.decode_gpu.as_ref()
+            .map(|g| &g.spec)
+            .unwrap_or(&self.prefill_gpu.spec);
         let kt = self.decode_gpu.as_ref()
             .and_then(|g| g.kernel_table.as_ref())
             .or_else(|| self.prefill_gpu.kernel_table.as_ref());
 
-        let latency = self.prefill_gpu.spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
+        let (latency, tokens_per_step) = if let Some(ref spec) = self.spec {
+            // Speculative decode: K serial draft steps + one main-model verify pass.
+            // Draft runs on same GPU as main; approximate verify cost as one main-model decode.
+            let draft_lat = spec.draft_tokens as f64
+                * decode_spec.decode_latency(batch_size, avg_kv_len, &spec.draft_model, None, &self.cluster);
+            let verify_lat = decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
+            (draft_lat + verify_lat, spec.tokens_per_step())
+        } else {
+            (decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster), 1.0)
+        };
 
         let start = self.decode_gpu_busy_until().max(self.clock);
         let done_time = start + latency;
         self.set_decode_gpu_busy(done_time);
 
-        // Advance all decoding requests by one step.
+        // Advance all decoding requests by tokens_per_step.
+        let advance = tokens_per_step.round().max(1.0) as u32;
         let req_ids: Vec<u64> = self.decoding.keys().copied().collect();
         let mut completed = Vec::new();
         let mut first_token_ids = Vec::new(); // requests getting their very first token this step
@@ -310,7 +388,7 @@ impl Simulator {
                 if *step == 0 {
                     first_token_ids.push(req_id);
                 }
-                *step += 1;
+                *step = (*step + advance).min(max_steps);
                 if *step >= max_steps {
                     completed.push(req_id);
                 }

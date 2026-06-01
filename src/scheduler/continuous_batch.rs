@@ -1,4 +1,4 @@
-use crate::workload::request::{InferenceRequest, RequestState};
+use crate::workload::request::{InferenceRequest, RequestPhase, RequestState};
 
 pub struct BatchDecision {
     pub admit: Vec<u64>,    // req_ids to move from waiting → prefilling
@@ -30,6 +30,17 @@ impl ContinuousBatchScheduler {
         let mut admit = Vec::new();
         let mut token_budget = self.max_batch_tokens.saturating_sub(in_flight);
         let mut kv_budget = kv_free_blocks;
+
+        // Preempt the largest decode request when KV is completely exhausted.
+        // Frees space for waiting requests; preempted request re-prefills from scratch.
+        if kv_budget == 0 && !waiting.is_empty() {
+            if let Some(victim) = running.iter()
+                .filter(|s| matches!(s.phase, RequestPhase::Decoding))
+                .max_by_key(|s| s.req.prompt_tokens + s.req.max_output_tokens)
+            {
+                return BatchDecision { admit: vec![], preempt: vec![victim.req.req_id] };
+            }
+        }
 
         for req in waiting {
             let tokens = req.prompt_tokens + req.max_output_tokens;
