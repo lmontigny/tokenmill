@@ -26,6 +26,9 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 20 | **kimi-k2** (1 T) | MI300X TP=8 EP=8 | chunked-prefill | 1 | 1.0 | 4 ms | 8 ms | 1.1 ms | Same 1 T model fits in 8×192 GB MI300X — no need for newer-gen HBM |
 | 21 | **kimi-k2** (1 T) | MI355X TP=8 EP=8 | chunked-prefill | 2 | 2.1 | 3 ms | 6 ms | **0.7 ms** | MI355X ties B200 at the trillion-param frontier |
 | 22 | **llama4-behemoth** (2 T) | B200 TP=16 EP=16 | chunked-prefill | 1 | 1.0 | 11 ms | 17 ms | 3.0 ms | 2 T total / 288 B active — needs 16 GPUs; active params dominate cost |
+| 23 | llama-70b-fp8 | **TPU v7 Ironwood** TP=4 | chunked-prefill | 5 | 5.2 | 14 ms | 24 ms | 3.3 ms | TPU Ironwood matches MI355X / B200 within 1 ms on 70B-fp8 |
+| 24 | kimi-k2 (1 T) | **TPU v8i** TP=8 EP=8 | chunked-prefill | 2 | 2.1 | **2 ms** | 4 ms | **0.5 ms** | 2026 TPU (specs projected): fastest of all accelerators tested on 1 T MoE |
+| 25 | deepseek-v3 | **TPU v8i** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | **3 ms** | 5 ms | **0.6 ms** | Edges out B200 (row 14) — 10 TB/s HBM4 vs 8 TB/s HBM3e |
 
 Key patterns:
 - **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.
@@ -37,3 +40,4 @@ Key patterns:
 - **Rows 17–18**: MI355X (CDNA 4) trades blows with B200 within a millisecond on both 70B-fp8 and 671B-MoE workloads.
 - **Rows 19–21**: Sparse MoE makes the trillion-param frontier tractable. Kimi K2 (1 T total / 32 B active) serves at 0.7 ms TPOT on 8 GPUs — the active-param footprint is what matters for decode bandwidth, not the total. MLA KV (32× smaller than MHA) is the second key enabler.
 - **Row 22**: Llama 4 Behemoth needs 9× more active params per token than Kimi K2 (288 B vs 32 B), so TPOT scales ~4× even though total params are only 2×. Active params, not total params, set the decode wall.
+- **Rows 23–25**: Google TPU v7 Ironwood matches the H100-class FP8 generation on equivalent workloads; TPU v8i (2026 specs projected from generational scaling) edges past B200 on memory-bound decode thanks to ~10 TB/s HBM4. The simulator treats ICI as a generic scale-up fabric and only models TP groups laid out along one torus dimension — accurate within-pod, not across DCN.

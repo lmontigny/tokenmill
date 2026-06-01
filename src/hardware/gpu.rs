@@ -203,6 +203,34 @@ impl GpuSpec {
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
             }),
+            // Google TPU v8i (2026, serving-optimized; specs projected from v7 Ironwood).
+            //
+            // ICI topology note: TPU pods use a 3D torus (not the rack/NVSwitch fat-tree). The
+            // ring-allreduce formula in ClusterConfig::all_reduce_latency models cost correctly
+            // when the TP group is laid out along ONE torus dimension (the common case for
+            // TP ≤ pod_side). For very large TP groups that span multiple dimensions the
+            // formula slightly under-estimates collective cost. Within-pod only (no DCN).
+            "tpu-v8i" => Some(Self {
+                name: "TPU-v8i".into(),
+                flops_bf16: 3500e12, // ~3.5 PFLOPS BF16 (projected, ~1.5× v7 Ironwood)
+                flops_fp8: 7000e12,  // ~7.0 PFLOPS FP8 (projected, B200/MI355X class)
+                hbm_bandwidth: 10.0e12, // 10 TB/s HBM4 (next-gen stack)
+                hbm_capacity: 256_000_000_000, // 256 GB HBM4 per chip (projected)
+                nvlink_bandwidth: 1500e9, // ICI: ~1.5 TB/s aggregate per chip (3D-torus link)
+                mfu_prefill: 0.70,   // XLA stack is mature; conservative midpoint
+                mfu_decode: 0.75,
+            }),
+            // Google TPU v7 Ironwood (April 2025, inference-focused). 3D-torus ICI; same caveat as v8i.
+            "tpu-v7-ironwood" => Some(Self {
+                name: "TPU-v7-Ironwood".into(),
+                flops_bf16: 2304e12,
+                flops_fp8: 4614e12,
+                hbm_bandwidth: 7.37e12,
+                hbm_capacity: 192_000_000_000,
+                nvlink_bandwidth: 1200e9, // ICI ~1.2 TB/s aggregate
+                mfu_prefill: 0.70,
+                mfu_decode: 0.75,
+            }),
             // AMD Instinct MI300X (CDNA 3, 2023) — H100 competitor with 2.4× more HBM at 1.6× BW.
             // Infinity Fabric stored in `nvlink_bandwidth` (scale-up fabric is treated uniformly).
             // MFU is conservative vs H100 — ROCm/vLLM kernel maturity gap.

@@ -134,6 +134,35 @@ fn mi355x_has_fp8_tensor_cores() {
 }
 
 #[test]
+fn tpu_v8i_beats_b200_on_decode() {
+    // TPU v8i projected: 10 TB/s × 0.75 = 7.5 TB/s effective.
+    // B200: 8 TB/s × 0.75 = 6.0 TB/s effective. Expect ~1.25× speedup.
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let tpu = GpuSpec::preset("tpu-v8i").unwrap();
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let b200_ms = b200.decode_latency(1, 256, &model, None, &c);
+    let tpu_ms = tpu.decode_latency(1, 256, &model, None, &c);
+
+    assert!(tpu_ms < b200_ms, "TPU v8i should beat B200 on decode");
+    let speedup = b200_ms / tpu_ms;
+    assert!(
+        speedup > 1.1 && speedup < 1.5,
+        "TPU v8i vs B200: expected 1.1-1.5× speedup on decode, got {:.2}×",
+        speedup
+    );
+}
+
+#[test]
+fn tpu_ironwood_has_fp8_and_torus_ici() {
+    let tpu = GpuSpec::preset("tpu-v7-ironwood").unwrap();
+    assert!(tpu.flops_fp8 > 0.0, "Ironwood has FP8 tensor cores");
+    // ICI is in the scale-up fabric field (~1.2 TB/s).
+    assert!(tpu.nvlink_bandwidth > 1_000e9);
+}
+
+#[test]
 fn a100_has_no_fp8_tensor_cores() {
     // A100 preset sets flops_fp8 = 0; FP8 model should fall back to bf16 path.
     let a100 = GpuSpec::preset("a100").unwrap();

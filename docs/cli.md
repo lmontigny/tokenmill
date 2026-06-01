@@ -4,7 +4,7 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | `h100` | GPU preset: `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` |
+| `--gpu` | `h100` | GPU preset: `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v7-ironwood` |
 | `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` \| `kimi-k2` \| `llama4-behemoth` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -61,5 +61,11 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 | `mi355x` | AMD CDNA 4 | 2500 | 5000 | 288 GB | 8 TB/s | 1.075 TB/s (IF Gen 4) |
 | `mi325x` | AMD CDNA 3 refresh | 1307 | 2614 | 256 GB | 6 TB/s | 896 GB/s (Infinity Fabric) |
 | `mi300x` | AMD CDNA 3 | 1307 | 2614 | 192 GB | 5.3 TB/s | 896 GB/s (Infinity Fabric) |
+| `tpu-v8i` | Google TPU v8i (2026) | 3500 † | 7000 † | 256 GB † | 10 TB/s † | 1.5 TB/s (ICI, 3D-torus) |
+| `tpu-v7-ironwood` | Google TPU v7 (Apr 2025) | 2304 | 4614 | 192 GB | 7.37 TB/s | 1.2 TB/s (ICI, 3D-torus) |
 
-The `nvlink_bandwidth` field is treated as a generic scale-up fabric bandwidth — Infinity Fabric for AMD GPUs uses the same all-reduce / all-to-all formulas. AMD MFU is set ~10% below the NVIDIA equivalent to reflect the ROCm vs CUDA kernel-maturity gap.
+† TPU v8i specs are **projected** from the v7 Ironwood generational jump; update when Google publishes official numbers.
+
+The `nvlink_bandwidth` field is treated as a generic **scale-up fabric** bandwidth — Infinity Fabric (AMD) and ICI (TPU) reuse the same all-reduce / all-to-all formulas.
+
+**TPU topology caveat**: TPU pods use a 3D torus interconnect, not the rack/NVSwitch fat-tree of GPU servers. The ring-allreduce formula is correct when the TP group is laid out along one torus dimension (the common case for TP ≤ pod_side). For very large TP groups spanning multiple dimensions, the model slightly under-estimates collective cost. Within-pod only — no DCN modelled.

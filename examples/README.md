@@ -20,3 +20,4 @@ bash examples/02_chunked_prefill_under_load.sh
 | 10 | `10_b200_blackwell.sh` | B200 Blackwell — 2-3× faster than H100 on FP8 |
 | 11 | `11_amd_mi300x.sh` | AMD MI300X — 70B model fits on a single GPU (192 GB HBM) |
 | 12 | `12_frontier_kimi_k2.sh` | Kimi K2 (1 T MoE) — trillion-param frontier on 8×B200 |
+| 13 | `13_google_tpu_v8i.sh` | Google TPU v8i (2026 projected) — Kimi K2 on 3D-torus pod |
