@@ -34,6 +34,19 @@ impl LlmConfig {
         self.n_experts > 1
     }
 
+    /// Active expert-weight bytes per forward pass — the portion sharded by EP, not TP.
+    /// For dense models returns 0 (all weights shard by TP).
+    /// Formula: n_moe_layers × (n_active_experts + n_shared_experts) × 2 × d_model × expert_hidden × dtype_bytes.
+    /// The factor of 2 covers gate+down projections (consistent with the 2N FLOPs roofline rule).
+    pub fn expert_weight_bytes_active(&self) -> u64 {
+        if !self.is_moe() || self.n_moe_layers == 0 {
+            return 0;
+        }
+        let hidden = if self.expert_hidden > 0 { self.expert_hidden } else { self.ffn_hidden };
+        let per_expert = 2 * self.d_model as u64 * hidden as u64 * self.dtype_bytes as u64;
+        self.n_moe_layers as u64 * (self.n_active_experts + self.n_shared_experts) as u64 * per_expert
+    }
+
     /// Fraction of model weights active per forward pass per token.
     /// For dense: 1.0. For MoE: uses active_weight_bytes/weight_bytes when available,
     /// otherwise falls back to a formula (attn always-on + sparse FFN routing).
@@ -99,6 +112,26 @@ impl LlmConfig {
                 n_layers: 32, d_model: 4096, n_heads: 32, n_kv_heads: 8,
                 head_dim: 128, ffn_hidden: 14336, vocab_size: 128256,
                 dtype_bytes: 2, weight_bytes: 16_000_000_000,
+                n_experts: 0, n_active_experts: 0, n_shared_experts: 0,
+                n_moe_layers: 0, expert_hidden: 0, kv_lora_rank: 0,
+                active_weight_bytes: 0,
+            }),
+            // ── FP8 dense variants (for validation against NIM/TRT-LLM benchmarks) ──
+            // Same architecture as BF16 counterparts; dtype_bytes=1 halves weight size.
+            "llama-70b-fp8" => Some(Self {
+                name: "llama-70b-fp8".into(),
+                n_layers: 80, d_model: 8192, n_heads: 64, n_kv_heads: 8,
+                head_dim: 128, ffn_hidden: 28672, vocab_size: 128256,
+                dtype_bytes: 1, weight_bytes: 70_000_000_000,
+                n_experts: 0, n_active_experts: 0, n_shared_experts: 0,
+                n_moe_layers: 0, expert_hidden: 0, kv_lora_rank: 0,
+                active_weight_bytes: 0,
+            }),
+            "llama-8b-fp8" => Some(Self {
+                name: "llama-8b-fp8".into(),
+                n_layers: 32, d_model: 4096, n_heads: 32, n_kv_heads: 8,
+                head_dim: 128, ffn_hidden: 14336, vocab_size: 128256,
+                dtype_bytes: 1, weight_bytes: 8_000_000_000,
                 n_experts: 0, n_active_experts: 0, n_shared_experts: 0,
                 n_moe_layers: 0, expert_hidden: 0, kv_lora_rank: 0,
                 active_weight_bytes: 0,

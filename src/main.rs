@@ -10,7 +10,7 @@ use std::path::Path;
 use clap::Parser;
 use rayon::prelude::*;
 
-use engine::sim::{Simulator, SchedulerKind, SpecConfig};
+use engine::sim::{Simulator, SchedulerKind, MtpConfig, SpecConfig};
 use hardware::cluster::ClusterConfig;
 use hardware::gpu::{GpuSpec, GpuState};
 use hardware::kernel_table::KernelTable;
@@ -116,6 +116,14 @@ struct Args {
     /// Draft model preset for speculative decoding (e.g. llama-8b when main is llama-70b)
     #[arg(long)]
     draft_model: Option<String>,
+
+    /// Multi-token prediction: number of MTP heads (0 = disabled). Cannot combine with --spec-tokens.
+    #[arg(long, default_value_t = 0)]
+    mtp_heads: u32,
+
+    /// Multi-token prediction: per-token acceptance rate γ (0.0–1.0)
+    #[arg(long, default_value_t = 0.9)]
+    mtp_acceptance_rate: f64,
 
     /// Random seed
     #[arg(long, default_value_t = 42)]
@@ -244,7 +252,9 @@ fn print_model_card(args: &Args) {
     let cluster_desc = build_cluster_desc(args, &gpu);
     println!("Cluster {}", sep);
     println!("  {}", cluster_desc);
-    println!("  HBM per GPU    {}  ({:.0} TFLOPS peak)", fmt_bytes(gpu.hbm_capacity), gpu.flops_bf16 / 1e12);
+    let peak_flops = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 { gpu.flops_fp8 } else { gpu.flops_bf16 };
+    let dtype_tag = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 { "FP8" } else { "BF16" };
+    println!("  HBM per GPU    {}  ({:.0} TFLOPS {} peak)", fmt_bytes(gpu.hbm_capacity), peak_flops / 1e12, dtype_tag);
 
     let weight_fit = if fits {
         format!("✓ fits  ({}/GPU < {} HBM)",
@@ -256,9 +266,9 @@ fn print_model_card(args: &Args) {
     };
     println!("  Weights        {}  total  →  {}", fmt_bytes(model.weight_bytes), weight_fit);
 
-    let cluster_flops_pflops = gpu.flops_bf16 * n_gpus as f64 / 1e15;
-    println!("  Peak FLOPS     {:.1} TFLOPS × {} GPUs  =  {:.1} PFLOPS",
-        gpu.flops_bf16 / 1e12, n_gpus, cluster_flops_pflops);
+    let cluster_flops_pflops = peak_flops * n_gpus as f64 / 1e15;
+    println!("  Peak FLOPS     {:.1} TFLOPS {} × {} GPUs  =  {:.1} PFLOPS",
+        peak_flops / 1e12, dtype_tag, n_gpus, cluster_flops_pflops);
 
     println!("  KV budget      {} blocks × {} tok  =  {:>8} tokens  ({})",
         kv_total_blocks, args.kv_block_size,
@@ -278,6 +288,14 @@ fn print_model_card(args: &Args) {
         };
         println!("  Spec decode    K={}  γ={:.2}  draft={}  → {:.2} tok/step expected",
             args.spec_tokens, args.spec_acceptance_rate, draft_name, expected_tok);
+    }
+    if args.mtp_heads > 0 {
+        let k = args.mtp_heads as f64;
+        let g = args.mtp_acceptance_rate.clamp(0.0, 1.0 - 1e-9);
+        let expected_tok = (1.0 - g.powf(k + 1.0)) / (1.0 - g);
+        let overhead_pct = k / model.n_layers as f64 * 100.0;
+        println!("  MTP            K={}  γ={:.2}  overhead={:.1}%/step  → {:.2} tok/step expected",
+            args.mtp_heads, args.mtp_acceptance_rate, overhead_pct, expected_tok);
     }
 
     println!("{}", sep);
@@ -368,6 +386,20 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         None
     };
 
+    if args.spec_tokens > 0 && args.mtp_heads > 0 {
+        eprintln!("Error: --spec-tokens and --mtp-heads are mutually exclusive.");
+        std::process::exit(1);
+    }
+
+    let mtp = if args.mtp_heads > 0 {
+        Some(MtpConfig {
+            num_heads: args.mtp_heads,
+            acceptance_rate: args.mtp_acceptance_rate,
+        })
+    } else {
+        None
+    };
+
     let mut sim = if args.workload.starts_with("trace:") {
         let path = &args.workload["trace:".len()..];
         let mut trace = TraceReplay::from_csv(Path::new(path))
@@ -378,6 +410,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         Simulator::new(prefill_gpu, decode_gpu, model.clone(), cluster, scheduler, &mut w, kv)
     };
     if let Some(s) = spec { sim = sim.with_spec(s); }
+    if let Some(m) = mtp  { sim = sim.with_mtp(m); }
 
     sim.run(args.duration);
 

@@ -41,6 +41,34 @@ impl SpecConfig {
     }
 }
 
+/// Multi-token prediction configuration.
+///
+/// The main model has K lightweight MTP heads (≈ 1 transformer layer each) appended after
+/// the final layer. A single forward pass produces the main token plus K speculative tokens.
+/// Overhead per step: K / n_layers × base decode cost.
+/// Expected tokens per step: (1 − γ^{K+1}) / (1 − γ)
+/// γ is typically higher than speculative decode (0.85–0.95) because the heads share the
+/// same residual stream as the main model and are trained jointly.
+pub struct MtpConfig {
+    /// Number of MTP prediction heads (K).
+    pub num_heads: u32,
+    /// Per-token acceptance rate (γ).
+    pub acceptance_rate: f64,
+}
+
+impl MtpConfig {
+    pub fn tokens_per_step(&self) -> f64 {
+        let k = self.num_heads as f64;
+        let g = self.acceptance_rate.clamp(0.0, 1.0 - 1e-9);
+        (1.0 - g.powf(k + 1.0)) / (1.0 - g)
+    }
+
+    /// Fraction of extra compute added by MTP heads relative to one base decode pass.
+    pub fn overhead_fraction(&self, n_layers: u32) -> f64 {
+        self.num_heads as f64 / n_layers.max(1) as f64
+    }
+}
+
 pub struct Simulator {
     pub clock: SimTime,
     queue: SimQueue,
@@ -55,6 +83,7 @@ pub struct Simulator {
     pub metrics: MetricsCollector,
     kv: KvCacheManager,
     spec: Option<SpecConfig>,
+    mtp: Option<MtpConfig>,
 
     waiting: Vec<InferenceRequest>,
     prefilling: FxHashMap<u64, RequestState>,
@@ -96,6 +125,7 @@ impl Simulator {
             metrics,
             kv,
             spec: None,
+            mtp: None,
             waiting: Vec::new(),
             prefilling: FxHashMap::default(),
             decoding: FxHashMap::default(),
@@ -107,6 +137,11 @@ impl Simulator {
 
     pub fn with_spec(mut self, spec: SpecConfig) -> Self {
         self.spec = Some(spec);
+        self
+    }
+
+    pub fn with_mtp(mut self, mtp: MtpConfig) -> Self {
+        self.mtp = Some(mtp);
         self
     }
 
@@ -361,15 +396,19 @@ impl Simulator {
             .and_then(|g| g.kernel_table.as_ref())
             .or_else(|| self.prefill_gpu.kernel_table.as_ref());
 
+        let base_lat = decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
         let (latency, tokens_per_step) = if let Some(ref spec) = self.spec {
             // Speculative decode: K serial draft steps + one main-model verify pass.
-            // Draft runs on same GPU as main; approximate verify cost as one main-model decode.
             let draft_lat = spec.draft_tokens as f64
                 * decode_spec.decode_latency(batch_size, avg_kv_len, &spec.draft_model, None, &self.cluster);
-            let verify_lat = decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster);
-            (draft_lat + verify_lat, spec.tokens_per_step())
+            (draft_lat + base_lat, spec.tokens_per_step())
+        } else if let Some(ref mtp) = self.mtp {
+            // MTP: single forward pass + K lightweight heads (≈1 layer each).
+            // Overhead = K / n_layers of base cost; heads run serially after main model.
+            let overhead = mtp.overhead_fraction(self.model.n_layers);
+            (base_lat * (1.0 + overhead), mtp.tokens_per_step())
         } else {
-            (decode_spec.decode_latency(batch_size, avg_kv_len, &self.model, kt, &self.cluster), 1.0)
+            (base_lat, 1.0)
         };
 
         let start = self.decode_gpu_busy_until().max(self.clock);

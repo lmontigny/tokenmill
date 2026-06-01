@@ -11,10 +11,12 @@
 ///     in flight (pipeline fill), which the DES models naturally via event timing.
 ///   - Inter-stage transfer cost: activation_bytes / nvlink_bw (intranode) or ibw (cross-node).
 ///
-/// EP (expert parallelism): MoE experts sharded across ep_degree GPUs.
-///   - Each GPU holds 1/ep experts; tokens are dispatched via all-to-all to their assigned GPU.
-///   - Two all-to-alls per MoE layer: dispatch (send tokens to expert GPUs) + combine (gather results).
-///   - All-to-all cost per direction ≈ (ep-1)/ep * tokens_per_gpu * d_model * dtype_bytes / nvlink_bw
+/// EP (expert parallelism): MoE experts sharded across ep_degree GPUs within a single NVLink
+/// scale-up domain (NVL72, HGX, DGX). No cross-node Ethernet/InfiniBand modeled.
+///   - Each GPU holds n_experts/ep experts; tokens are dispatched via NVLink all-to-all.
+///   - Two all-to-alls per MoE layer: dispatch (send top_K token activations out) + combine (gather).
+///   - All-to-all data per GPU per direction ≈ (ep-1)/ep × (top_K × batch / ep) × d_model × dtype_bytes.
+///   - NVSwitch fabric provides full bisection BW; formula is bandwidth-dominated (large-message regime).
 #[derive(Debug, Clone)]
 pub struct ClusterConfig {
     pub tp: u32,
@@ -64,8 +66,9 @@ impl ClusterConfig {
     /// All-to-all latency for one direction of expert dispatch or combine (seconds).
     /// Called twice per MoE layer: once to send tokens to expert GPUs, once to gather results.
     ///
-    /// Each GPU sends batch_tokens/ep tokens (assuming balanced routing) to each of the other
-    /// ep-1 GPUs, so the per-GPU data volume is (ep-1)/ep * tokens * d_model * dtype_bytes.
+    /// `batch_tokens` must already be multiplied by top_K at the call site (caller knows the model).
+    /// Per-GPU send volume = (ep-1)/ep × (batch_tokens/ep) × d_model × dtype_bytes.
+    /// Uses nvlink_bw (NVLink switch fabric; all sends happen in parallel, bandwidth-dominated).
     pub fn ep_all_to_all_latency(&self, batch_tokens: u64, d_model: u32, dtype_bytes: u32) -> f64 {
         if self.ep <= 1 || self.nvlink_bw <= 0.0 {
             return 0.0;
