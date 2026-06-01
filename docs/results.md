@@ -18,6 +18,10 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 12 | llama-8b-fp8 | **B200** TP=1 | chunked-prefill | 50 | 50.8 | **7 ms** | 13 ms | **1.6 ms** | Blackwell: ~3× lower TTFT, ~3× lower TPOT vs H100 (row 3) |
 | 13 | llama-70b-fp8 | **B200** TP=4 | chunked-prefill | 5 | 5.2 | **12 ms** | 23 ms | **3.0 ms** | Blackwell on 70B: 2.4× faster TTFT, 2.3× faster TPOT vs H100 (row 9) |
 | 14 | deepseek-v3 | **B200** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | **3 ms** | 6 ms | **0.8 ms** | 671 B MoE on Blackwell — sub-ms TPOT |
+| 15 | llama-70b-fp8 | **MI300X** TP=**1** | chunked-prefill | 5 | 5.0 | 114 ms | 224 ms | 23.3 ms | 70 B fits on **one** AMD GPU (192 GB HBM3) — no TP needed |
+| 16 | llama-8b-fp8 | **MI300X** TP=1 | chunked-prefill | 50 | 50.7 | **14 ms** | 29 ms | **3.0 ms** | MI300X vs H100 row 3: 33% lower TTFT, 33% lower TPOT |
+| 17 | llama-70b-fp8 | **MI355X** TP=4 | chunked-prefill | 5 | 5.2 | 13 ms | 23 ms | 3.1 ms | MI355X (CDNA 4) essentially ties B200 on 70B FP8 (row 13) |
+| 18 | deepseek-v3 | **MI355X** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | 4 ms | 7 ms | **0.8 ms** | MI355X matches B200 (row 14) on 671B MoE — sub-ms TPOT |
 
 Key patterns:
 - **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.
@@ -25,3 +29,5 @@ Key patterns:
 - **Row 4**: speculative decoding (`--spec-tokens 3`) reduces TPOT by 24% at the same throughput.
 - **Row 11**: DeepSeek V3 (671 B) on 8×H100 with EP=8 serves at 1.7 ms TPOT — MLA KV compression keeps the KV footprint tiny.
 - **Rows 12–14**: B200 (Blackwell) delivers ~2.3–3× speedup over H100 across the board — 2× FP8 TFLOPS and 2.4× HBM BW (8 TB/s vs 3.35 TB/s).
+- **Rows 15–16**: MI300X's 192 GB HBM3 lets 70B-fp8 run on a single GPU (vs H100 needing TP=4). For memory-bound decode, MI300X beats H100 by ~33% at iso-config (row 16 vs row 3) — 5.3 TB/s vs 3.35 TB/s HBM, even after the 10% MFU haircut for ROCm maturity.
+- **Rows 17–18**: MI355X (CDNA 4) trades blows with B200 within a millisecond on both 70B-fp8 and 671B-MoE workloads.

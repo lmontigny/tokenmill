@@ -4,7 +4,9 @@ Discrete-event simulator for LLM inference workloads, written in Rust.
 
 Models prefill/decode phases, KV cache, continuous batching, chunked prefill,
 tensor / pipeline / expert parallelism, disaggregated prefill/decode,
-speculative decoding, and multi-token prediction.
+speculative decoding, and multi-token prediction. Supports NVIDIA Hopper /
+Blackwell (`h100`, `b200`) and AMD CDNA 3 / 4 (`mi300x`, `mi325x`, `mi355x`)
+GPUs out of the box.
 Targets **~10% error** vs real GPU hardware (see [docs/validation.md](docs/validation.md)).
 
 ## Build
