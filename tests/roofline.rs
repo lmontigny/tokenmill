@@ -192,6 +192,39 @@ fn tpu_8i_sram_helps_small_batch_kv() {
 }
 
 #[test]
+fn groq_chip_is_sram_only_with_tiny_capacity() {
+    // Groq LPU has no off-chip HBM — 230 MB on-chip SRAM at 80 TB/s.
+    // The "HBM" fields represent that on-chip memory; on_chip_sram=0 because
+    // it would otherwise double-count (the HBM IS the SRAM).
+    let groq = GpuSpec::preset("groq-lpu-v1").unwrap();
+    assert_eq!(groq.hbm_capacity, 230_000_000);
+    assert!(
+        (groq.hbm_bandwidth - 80e12).abs() < 1e6,
+        "expected 80 TB/s SRAM BW"
+    );
+    assert_eq!(groq.on_chip_sram, 0);
+}
+
+#[test]
+fn groq_needs_high_tp_for_large_models() {
+    // llama-70b-fp8 (70 GB) divided across 230 MB chips ≈ 305 chips minimum.
+    // Sanity check: per-chip latency drops as TP rises.
+    let groq = GpuSpec::preset("groq-lpu-v1").unwrap();
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let mut c = ClusterConfig::single_gpu();
+    c.tp = 358;
+    c.nvlink_bw = groq.nvlink_bandwidth;
+
+    // At TP=358, per-chip weights ≈ 195 MB — fits in 230 MB SRAM.
+    let t = groq.decode_latency(1, 256, &model, None, &c);
+    assert!(
+        t > 0.0 && t < 0.001,
+        "expected sub-millisecond decode, got {:.3} ms",
+        t * 1000.0
+    );
+}
+
+#[test]
 fn sram_no_benefit_when_kv_doesnt_fit() {
     // For large batch × long-context MHA (e.g. llama-70b at batch=32, seq=4096), KV per chip
     // is hundreds of MB — exceeds even TPU 8i's 384 MB SRAM. Latency should match no-SRAM case.

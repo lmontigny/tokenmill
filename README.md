@@ -6,7 +6,8 @@ Models prefill/decode phases, KV cache, continuous batching, chunked prefill,
 tensor / pipeline / expert parallelism, disaggregated prefill/decode,
 speculative decoding, and multi-token prediction. Supports NVIDIA Hopper /
 Blackwell (`h100`, `b200`), AMD CDNA 3 / 4 (`mi300x`, `mi325x`, `mi355x`),
-and Google TPU (`tpu-v7-ironwood`, `tpu-v8i`) accelerators out of the box.
+Google TPU (`tpu-v7-ironwood`, `tpu-v8i`, `tpu-v8t`), and Groq LPU
+(`groq-lpu-v1`) accelerators out of the box.
 Targets **~10% error** vs real GPU hardware (see [docs/validation.md](docs/validation.md)).
 
 ## Build

@@ -280,7 +280,7 @@ impl GpuSpec {
                 mfu_decode: 0.65,
             }),
             // Fall through to vendor-specific accelerator modules.
-            other => super::tpu::preset(other),
+            other => super::tpu::preset(other).or_else(|| super::groq::preset(other)),
         }
     }
 }

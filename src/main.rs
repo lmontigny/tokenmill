@@ -18,7 +18,7 @@ use tokenmill::workload::trace_replay::TraceReplay;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "tokenmill", about = "LLM inference discrete-event simulator")]
 struct Args {
-    /// GPU/TPU preset: b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x | tpu-v8i | tpu-v8t | tpu-v7-ironwood
+    /// Accelerator preset: b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x | tpu-v8i | tpu-v8t | tpu-v7-ironwood | groq-lpu-v1
     #[arg(long, default_value = "h100")]
     gpu: String,
 

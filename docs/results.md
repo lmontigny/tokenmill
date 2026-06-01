@@ -30,6 +30,10 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 24 | kimi-k2 (1 T) | **TPU 8i** TP=8 EP=8 | chunked-prefill | 2 | 2.1 | **2 ms** | 4 ms | **0.6 ms** | TPU 8i (288 GB HBM, 8.6 TB/s, Boardfly + CAE) on 1 T MoE — ties B200 |
 | 25 | deepseek-v3 | **TPU 8i** TP=8 EP=8 | chunked-prefill | 5 | 5.2 | **3 ms** | 5 ms | **0.7 ms** | TPU 8i on 671 B MoE — matches B200 (row 14) within rounding |
 | 26 | llama-70b-fp8 | **TPU 8i** TP=8 | chunked-prefill | 3 | 3.2 | **5 ms** | 9 ms | **1.3 ms** | Standard GQA at small batch: TPU 8i beats B200 by ~15% via 384 MB Vmem (KV fits on-chip) |
+| 27 | llama-8b-fp8 | **Groq LPU v1** TP=**64** | chunked-prefill | 30 | 30.6 | 1 ms | 2 ms | <0.1 ms ★ | 8 GB model needs 64 chips (230 MB/chip). 80 TB/s SRAM gives spec-sheet decode; real TPOT will be higher |
+| 28 | llama-70b-fp8 | **Groq LPU v1** TP=**358** | chunked-prefill | 5 | 5.2 | 4 ms | 8 ms | <0.1 ms ★ | 70 GB needs 358 chips. Optimistic — see ★ note below |
+
+★ Groq numbers are **upper-bound optimistic**. The simulator captures the 80 TB/s SRAM bandwidth and ~85% deterministic-scheduling MFU, but does *not* model per-hop link latency in the chip mesh, which dominates real-world Groq TPOT at hundreds of TP. Real Groq llama-70b serving is reported at ~2–4 ms TPOT, not the sub-ms shown here. Calibrate via `data/kernel_table.csv` if you need accuracy.
 
 Key patterns:
 - **Rows 2 vs 3**: under saturation, `chunked-prefill` keeps TTFT at ~21 ms where `continuous-batch` lets it spike to 2.4 s.

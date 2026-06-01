@@ -16,3 +16,4 @@
 | 12 | ✅ | Frontier-class model presets — Kimi K2 (1.026 T MoE, 384 experts, MLA KV) and Llama 4 Behemoth (2 T MoE, 16 huge experts). Demonstrates that the simulator handles trillion-param clusters. |
 | 13 | ✅ | Google TPU presets — v7 Ironwood (2025), v8t (training, 3D torus), v8i (serving, Boardfly). Official 8t/8i specs from Google Cloud blog; FP8/BF16 derived from FP4. |
 | 14 | ✅ | On-chip SRAM modelling — `on_chip_sram` field on `GpuSpec`. When per-chip KV fits in SRAM, decode KV traffic is served at 1/10 the HBM cost. Captures the TPU 8i 384 MB Vmem advantage on low-latency serving. |
+| 15 | ✅ | Split presets by vendor — TPU into `src/hardware/tpu.rs`, Groq LPU v1 into `src/hardware/groq.rs`. Groq has no off-chip HBM; the "HBM" fields carry the 230 MB / 80 TB/s on-chip SRAM, so any non-trivial model needs very high `--tp`. Deterministic-flow per-hop latency is not modelled (results are upper-bound optimistic at large TP). |
