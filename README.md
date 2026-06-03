@@ -1,14 +1,23 @@
 # tokenmill
 
-Discrete-event simulator for LLM inference workloads, written in Rust.
+A discrete-event simulator for LLM inference clusters, written in Rust.
+Predicts latency, throughput, energy, and **$ per million tokens** for any
+combination of model / hardware / parallelism / scheduler — useful for capacity
+planning, hardware shortlisting, and what-if analysis *before* you provision
+the GPUs.
 
-Models prefill/decode phases, KV cache, continuous batching, chunked prefill,
-tensor / pipeline / expert parallelism, disaggregated prefill/decode,
-speculative decoding, and multi-token prediction. Supports NVIDIA Hopper /
-Blackwell (`h100`, `b200`), AMD CDNA 3 / 4 (`mi300x`, `mi325x`, `mi355x`),
-Google TPU (`tpu-v7-ironwood`, `tpu-v8i`, `tpu-v8t`), and Groq LPU
-(`groq-lpu-v1`) accelerators out of the box.
-Targets **~10% error** vs real GPU hardware (see [docs/validation.md](docs/validation.md)).
+**Built-in support for:**
+- **Schedulers** — continuous batching (Orca), chunked prefill (Sarathi), preemption / recompute
+- **Parallelism** — tensor (TP), pipeline (PP), expert (EP), disaggregated prefill/decode
+- **Speedups** — speculative decoding, multi-token prediction, paged KV cache, MLA KV compression
+- **Models** — dense (Llama 8B / 70B + FP8) and MoE (Mixtral, Llama 4 Maverick / Behemoth, DeepSeek V3, Kimi K2 1 T)
+- **Hardware** — NVIDIA `b200` / `h100` / `a100` / `a10g`, AMD `mi300x` / `mi325x` / `mi355x`, Google TPU `v7-ironwood` / `8t` / `8i`, Groq `lpu-v1`
+- **Reporting** — TTFT / TPOT histograms, KV utilization, **energy (J)**, **mean power (kW)**, **cost ($ / Mtok)**
+
+Targets **~10% error** vs real GPU kernel time on validated configs (see [docs/validation.md](docs/validation.md)).
+All collective formulas assume one scale-up domain — **a single rack or pod** —
+using NVLink / Infinity Fabric / TPU ICI / Groq C2C. Cross-rack DCN traffic is
+not modelled; see [docs/topology.md](docs/topology.md) for what's in scope.
 
 ## Build
 
@@ -50,6 +59,7 @@ cargo run --release -- \
 - **[Benchmark validation](docs/validation.md)** — MAPE vs real NVIDIA GPUs
 - **[Power and energy](docs/power.md)** — per-chip TDP model, energy per token
 - **[Cost](docs/cost.md)** — $/Mtok from GPU-hour pricing, comparison to vendor rates
+- **[Topology and scope](docs/topology.md)** — what scale-up fabric is modelled per vendor, and why DCN is out of scope
 - **[Architecture](docs/architecture.md)** — module layout and DES engine
 - **[Roadmap](docs/roadmap.md)** — phase history
 
@@ -60,7 +70,7 @@ bash examples/02_chunked_prefill_under_load.sh   # one-feature-per-script demos
 cargo test --release                              # integration tests under tests/
 ```
 
-See [`examples/README.md`](examples/README.md) for the full list (10 scripts).
+See [`examples/README.md`](examples/README.md) for the full list (15 scripts).
 
 ## License
 
