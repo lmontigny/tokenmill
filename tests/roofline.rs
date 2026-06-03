@@ -298,6 +298,63 @@ fn tpu_8i_sram_helps_small_batch_kv() {
 }
 
 #[test]
+fn gpu_sram_only_discounts_decode_kv_traffic() {
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let mut b200_no_sram = b200.clone();
+    b200_no_sram.on_chip_sram = 0;
+
+    let model = LlmConfig::preset("llama-8b-w4a8kv4").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    assert!(model.kv_bytes(1024) * 2 <= b200.on_chip_sram);
+
+    let decode_with_sram = b200.decode_latency(2, 1024, &model, None, &c);
+    let decode_no_sram = b200_no_sram.decode_latency(2, 1024, &model, None, &c);
+    assert!(
+        decode_with_sram < decode_no_sram,
+        "GPU SRAM should reduce decode latency when KV fits ({:.3} ms vs {:.3} ms)",
+        decode_with_sram * 1000.0,
+        decode_no_sram * 1000.0
+    );
+
+    let prefill_with_sram = b200.prefill_latency(1, 512, &model, None, &c);
+    let prefill_no_sram = b200_no_sram.prefill_latency(1, 512, &model, None, &c);
+    assert!(
+        (prefill_with_sram - prefill_no_sram).abs() < 1e-12,
+        "SRAM should not change prefill roofline latency"
+    );
+}
+
+#[test]
+fn pipeline_parallelism_uses_per_stage_kv_for_sram_fit() {
+    let tpu = GpuSpec::preset("tpu-v8i").unwrap();
+    let mut tpu_no_sram = tpu.clone();
+    tpu_no_sram.on_chip_sram = 0;
+
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let mut c = ClusterConfig::single_gpu();
+    c.pp = 8;
+    c.scale_up_bw = tpu.scale_up_bandwidth;
+    c.scale_up_latency = tpu.scale_up_latency;
+
+    // Full-chip KV is about 655 MB, which exceeds TPU 8i's 384 MB Vmem. With
+    // PP=8, each stage owns about 82 MB of KV layers, so the SRAM fast path
+    // should apply.
+    assert!(model.kv_bytes(1024) * 4 > tpu.on_chip_sram);
+    assert!(model.kv_bytes(1024) * 4 / c.pp as u64 <= tpu.on_chip_sram);
+
+    let with_sram = tpu.decode_latency(4, 1024, &model, None, &c);
+    let no_sram = tpu_no_sram.decode_latency(4, 1024, &model, None, &c);
+
+    assert!(
+        with_sram < no_sram,
+        "SRAM fit check should use per-PP-stage KV ({:.3} ms vs {:.3} ms)",
+        with_sram * 1000.0,
+        no_sram * 1000.0
+    );
+}
+
+#[test]
 fn groq_chip_is_sram_only_with_tiny_capacity() {
     // Groq LPU has no off-chip HBM — 230 MB on-chip SRAM at 80 TB/s.
     // The "HBM" fields represent that on-chip memory; on_chip_sram=0 because

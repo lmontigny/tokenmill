@@ -154,7 +154,7 @@ impl GpuSpec {
             kt.lookup_nearest_batch(&self.name, &model.name, KernelOp::Decode, batch, avg_kv_len)
         }) {
             Some(single_gpu_lat) => single_gpu_lat / tp as f64,
-            None => self.roofline_decode(batch, avg_kv_len, model, tp, cluster.ep),
+            None => self.roofline_decode(batch, avg_kv_len, model, tp, pp, cluster.ep),
         };
 
         let activation_bytes = model.activation_bytes();
@@ -227,10 +227,12 @@ impl GpuSpec {
         avg_kv_len: u32,
         model: &LlmConfig,
         tp: u32,
+        pp: u32,
         ep: u32,
     ) -> f64 {
         let kv_bytes = model.kv_bytes(avg_kv_len) * batch as u64;
         let kv_bytes_per_chip = kv_bytes / tp as u64;
+        let kv_bytes_per_pp_stage = kv_bytes / (tp as u64 * pp as u64);
 
         let weight_bytes_per_chip = if ep > 1 && model.is_moe() {
             let expert_bytes = self.effective_expert_weight_bytes_active(model);
@@ -242,13 +244,13 @@ impl GpuSpec {
             self.effective_weight_bytes_active(model) / tp as u64
         };
 
-        // SRAM benefit: if the per-chip KV fits in on-chip SRAM, it costs ~1/10 of HBM.
-        let kv_effective_bytes = if self.on_chip_sram > 0 && kv_bytes_per_chip <= self.on_chip_sram
-        {
-            kv_bytes_per_chip / 10
-        } else {
-            kv_bytes_per_chip
-        };
+        // SRAM benefit: if the per-stage KV fits in on-chip SRAM, it costs ~1/10 of HBM.
+        let kv_effective_bytes =
+            if self.on_chip_sram > 0 && kv_bytes_per_pp_stage <= self.on_chip_sram {
+                kv_bytes_per_chip / 10
+            } else {
+                kv_bytes_per_chip
+            };
 
         let bytes_per_gpu = weight_bytes_per_chip + kv_effective_bytes;
         bytes_per_gpu as f64 / (self.memory_bandwidth * self.mfu_decode)
