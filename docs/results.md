@@ -32,8 +32,12 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 | 26 | llama-70b-fp8 | **TPU 8i** TP=8 | chunked-prefill | 3 | 3.2 | **6 ms** | 11 ms | **1.7 ms** | 4.06 J | $22.86 | Standard GQA at small batch — TPU 8i beats B200 by ~15% TPOT |
 | 27 | llama-8b-fp8 | **Groq LPU v1** TP=**64** | chunked-prefill | 30 | 30.5 | 4 ms | 8 ms | 0.9 ms ★ | 1.24 J | **$1.36** | 64 chips × $0.30/hr = $19/hr cluster — cheap per chip, expensive per token |
 | 28 | llama-70b-fp8 | **Groq LPU v1** TP=**358** | chunked-prefill | 5 | 5.1 | 58 ms | 88 ms | 12.7 ms ★ | 40.0 J | $44.22 | 358 chips × $0.30/hr = $107/hr cluster — frontier scale on tiny chips |
+| 29 | kimi-k2 (Thinking, 4K/4K) | **HGX B200** (8× B200) | chunked-prefill | 5 | 4.1 | 29 ms | 55 ms | 3.1 ms | 195 mJ | $0.90 | NVIDIA HGX B200 reference workload for Kimi K2 Thinking (ISL=OSL=4K) |
+| 30 | kimi-k2 (Thinking, 4K/4K) | **HGX Rubin NVL8** (8× Rubin) | chunked-prefill | 5 | 4.6 | **16 ms** | 26 ms | **1.9 ms** | 247 mJ | $1.29 | Rubin vs B200: 1.8× lower TTFT, 1.6× lower TPOT, 1.2× more throughput at FP8 dense ‡ |
 
 ★ Groq numbers are **upper-bound optimistic** for TPOT (real-world serving is reported at ~2–4 ms on llama-70b), but `scale_up_latency` now captures the per-hop chip-mesh α component. Calibrate via `data/kernel_table.csv` for production accuracy.
+
+‡ NVIDIA's own slides claim **10× more token-factory throughput** for HGX Rubin NVL8 vs HGX B200 on this exact workload. The headline 10× uses **Rubin with sparse NVFP4 vs B200 with dense NVFP4** — we model FP8 dense for both (no FP4 support yet), so our row 30 shows the FP8-dense-iso comparison: ~1.6–1.8× from raw memory-BW and FLOPS scaling. FP4 sparsity would contribute another ~4× on top, getting close to the published number. Adding FP4 support is tracked under [mixed-precision quantization](roadmap.md).
 
 ## Cheapest serving rates in this table
 

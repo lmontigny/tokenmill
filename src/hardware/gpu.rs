@@ -213,7 +213,28 @@ impl GpuSpec {
 
     pub fn preset(name: &str) -> Option<Self> {
         match name {
-            // NVIDIA Blackwell B200 SXM (NVL72/HGX). FP4 not modeled — listed for reference: 9000 TFLOPS dense.
+            // NVIDIA Rubin SXM (HGX Rubin NVL8 = 8× this chip in one server, 2026).
+            // Official per-chip specs from nvidia.com/en-us/data-center/hgx/:
+            //   - HBM4: 288 GB at 22 TB/s
+            //   - NVFP4 inference (sparse): 50 PFLOPS  → dense FP8 = 17.5 PFLOPS (NVIDIA-published)
+            //   - NVLink 6: 3.6 TB/s aggregate per chip (2× B200's 1.8 TB/s)
+            //   - HGX system: 28.8 TB/s NVLink switch, 400 PFLOPS NVFP4 sparse, 2.3 TB HBM
+            // TDP / price are not yet public — 2026 estimates.
+            "rubin" => Some(Self {
+                name: "Rubin-SXM".into(),
+                flops_bf16: 8750e12,       // 8.75 PFLOPS BF16 dense (FP8 / 2)
+                flops_fp8: 17500e12,       // 17.5 PFLOPS FP8 dense (NVIDIA-published)
+                memory_bandwidth: 22.0e12, // 22 TB/s HBM4 (2.75× B200)
+                memory_capacity: 288_000_000_000, // 288 GB HBM4 (1.5× B200)
+                on_chip_sram: 150_000_000, // ~150 MB L2 estimate
+                scale_up_bandwidth: 3600e9, // NVLink 6: 3.6 TB/s aggregate per chip
+                scale_up_latency: 800e-9,  // NVSwitch 6 ~800 ns (estimate, faster than NVL5)
+                tdp_watts: 1500.0,         // Rubin estimate; not yet published
+                cost_per_hour_usd: 11.00,  // 2026/2027 launch estimate
+                mfu_prefill: 0.68,         // conservative — new gen, software stack maturing
+                mfu_decode: 0.72,
+            }),
+            // NVIDIA Blackwell B200 SXM (HGX B200 = 8× this chip; also used in NVL72 racks).
             "b200" => Some(Self {
                 name: "B200-SXM".into(),
                 flops_bf16: 2250e12,              // 2.25 PFLOPS dense BF16/FP16

@@ -23,3 +23,4 @@ bash examples/02_chunked_prefill_under_load.sh
 | 13 | `13_google_tpu_v8i.sh` | Google TPU v8i (2026 projected) — Kimi K2 on 3D-torus pod |
 | 14 | `14_groq_lpu.sh` | Groq LPU v1 — SRAM-only, 64 chips for llama-8b-fp8 |
 | 15 | `15_power_analysis.sh` | Arrival-rate sweep with energy per token — idle vs active power tradeoff |
+| 16 | `16_hgx_rubin_nvl8.sh` | NVIDIA HGX Rubin NVL8 (2026) on Kimi K2 Thinking (4K/4K) — Rubin vs B200 |

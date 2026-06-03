@@ -4,7 +4,7 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | `h100` | Accelerator preset: `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` |
+| `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` |
 | `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` \| `kimi-k2` \| `llama4-behemoth` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -54,6 +54,7 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 
 | Preset | Family | BF16 TFLOPS | FP8 TFLOPS | Mem | Mem BW | Scale-up BW | TDP |
 |---|---|---:|---:|---:|---:|---:|---:|
+| `rubin` | NVIDIA Rubin (2026) | 8750 | 17500 | 288 GB | 22 TB/s | 3.6 TB/s (NVLink 6) | 1500 W † |
 | `b200` | NVIDIA Blackwell | 2250 | 4500 | 192 GB | 8 TB/s | 1.8 TB/s (NVLink 5) | 1000 W |
 | `h100` | NVIDIA Hopper | 989 | 1978 | 80 GB | 3.35 TB/s | 900 GB/s (NVLink 4) | 700 W |
 | `a100` | NVIDIA Ampere | 312 | — | 80 GB | 2 TB/s | 600 GB/s (NVLink 3) | 400 W |

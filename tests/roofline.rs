@@ -85,6 +85,35 @@ fn tp_scales_decode_inversely_with_degree() {
 }
 
 #[test]
+fn rubin_decode_beats_b200_proportional_to_hbm() {
+    // Rubin: 22 TB/s × 0.72 MFU = 15.84 TB/s effective.
+    // B200:  8 TB/s × 0.75 MFU =  6.00 TB/s effective.
+    // Expect ~2.5× speedup on memory-bound decode (HBM4 22 vs HBM3e 8 TB/s, before EP overhead).
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let rubin = GpuSpec::preset("rubin").unwrap();
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let b200_ms = b200.decode_latency(1, 256, &model, None, &c);
+    let rubin_ms = rubin.decode_latency(1, 256, &model, None, &c);
+    let speedup = b200_ms / rubin_ms;
+    assert!(
+        (2.0..3.0).contains(&speedup),
+        "Rubin vs B200 decode: expected 2-3× speedup, got {:.2}×",
+        speedup
+    );
+}
+
+#[test]
+fn rubin_has_largest_hbm_in_nvidia_lineup() {
+    // 288 GB HBM4 — 1.5× B200, 3.6× H100.
+    let rubin = GpuSpec::preset("rubin").unwrap();
+    let b200 = GpuSpec::preset("b200").unwrap();
+    assert!(rubin.memory_capacity > b200.memory_capacity);
+    assert_eq!(rubin.memory_capacity, 288_000_000_000);
+}
+
+#[test]
 fn b200_is_faster_than_h100_for_fp8() {
     // B200 has 2× FP8 TFLOPS and 2.4× HBM BW; expect ~2-2.5× faster on FP8 workloads.
     let h100 = GpuSpec::preset("h100").unwrap();
