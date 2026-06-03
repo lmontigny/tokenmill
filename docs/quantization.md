@@ -58,3 +58,6 @@ and active prefill FLOPs by that sparsity factor.
 - The model does not simulate quantization accuracy loss, scale metadata,
   outlier channels, or dequantization overhead.
 - W4A16 keeps activation collectives at 16 bits even though weights are 4 bits.
+
+See [`quantization-validation.md`](quantization-validation.md) for the B200 FP4
+comparison against public TensorRT-LLM numbers.
