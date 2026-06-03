@@ -49,6 +49,7 @@ cargo run --release -- \
 - **[Example results](docs/results.md)** — 14 representative simulation runs
 - **[Benchmark validation](docs/validation.md)** — MAPE vs real NVIDIA GPUs
 - **[Power and energy](docs/power.md)** — per-chip TDP model, energy per token
+- **[Cost](docs/cost.md)** — $/Mtok from GPU-hour pricing, comparison to vendor rates
 - **[Architecture](docs/architecture.md)** — module layout and DES engine
 - **[Roadmap](docs/roadmap.md)** — phase history
 

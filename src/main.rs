@@ -564,10 +564,12 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         &format!("{} {}", args.scheduler, parallelism),
         args.tp,
         args.pp,
+        args.ep,
         args.disaggregate,
         arrival_rate,
         latency_mode,
         gpu_spec.tdp_watts,
+        gpu_spec.cost_per_hour_usd,
     )
 }
 

@@ -43,7 +43,10 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             // why Groq's real TPOT at TP=358 is dominated by the chip-mesh diameter,
             // not by SRAM bandwidth (which is essentially infinite for this purpose).
             scale_up_latency: 100e-9,
-            tdp_watts: 215.0,  // GroqChip 1 — published typical (peak ~300W)
+            tdp_watts: 215.0, // GroqChip 1 — published typical (peak ~300W)
+            // Groq doesn't sell per-chip; pricing is per-rack. $0.30/hr/chip is
+            // back-calculated from their published per-token rates and pod size.
+            cost_per_hour_usd: 0.30,
             mfu_prefill: 0.85, // Deterministic compiler-scheduled execution → very high util
             mfu_decode: 0.90,
         }),

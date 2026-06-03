@@ -40,6 +40,7 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             scale_up_bandwidth: 2400e9, // ICI ~2.4 TB/s aggregate (2× v7 Ironwood per blog)
             scale_up_latency: 200e-9,   // Boardfly 7-hop diameter ⇒ very low per-hop α
             tdp_watts: 600.0, // TPU 8i estimate (Google "2× perf/W" claim implies modest TDP)
+            cost_per_hour_usd: 4.50, // estimated 2026 GCP on-demand
             mfu_prefill: 0.72,
             mfu_decode: 0.80, // CAE + huge Vmem → strong decode efficiency
         }),
@@ -55,6 +56,7 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             scale_up_bandwidth: 2400e9, // ICI 2× v7 Ironwood (blog: "2x scale-up bandwidth")
             scale_up_latency: 500e-9,   // 3D-torus hop ~500 ns
             tdp_watts: 750.0,           // TPU 8t estimate (training chip, more compute)
+            cost_per_hour_usd: 5.50,    // estimate; TPU 8t marketed for training workloads
             mfu_prefill: 0.70,
             mfu_decode: 0.75,
         }),
@@ -70,6 +72,7 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             scale_up_bandwidth: 1200e9, // ICI ~1.2 TB/s aggregate
             scale_up_latency: 500e-9,  // 3D-torus hop ~500 ns
             tdp_watts: 500.0,          // v7 Ironwood estimate
+            cost_per_hour_usd: 4.00,   // extrapolated from GCP TPU v5p pricing
             mfu_prefill: 0.70,
             mfu_decode: 0.75,
         }),

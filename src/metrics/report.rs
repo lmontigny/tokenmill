@@ -42,6 +42,12 @@ pub struct RunSummary {
     pub mean_power_kw: f64,
     pub energy_per_token_mj: f64,
     pub energy_per_request_j: f64,
+
+    // cost (0.0 when the GPU preset has no cost_per_hour_usd)
+    pub total_cost_usd: f64,
+    pub cost_per_million_tokens_usd: f64,
+    pub cost_per_request_usd: f64,
+    pub cluster_cost_per_hour_usd: f64,
 }
 
 impl RunSummary {
@@ -83,6 +89,15 @@ impl RunSummary {
                 self.energy_per_request_j
             );
         }
+        if self.total_cost_usd > 0.0 {
+            println!(
+                "Cost                ${:.2} total   ${:.3}/Mtok   ${:.6}/req   (${:.2}/hr cluster)",
+                self.total_cost_usd,
+                self.cost_per_million_tokens_usd,
+                self.cost_per_request_usd,
+                self.cluster_cost_per_hour_usd,
+            );
+        }
     }
 
     pub fn print_json(&self) {
@@ -97,12 +112,14 @@ impl RunSummary {
                   ttft_p50_ms,ttft_p95_ms,ttft_p99_ms,\
                   prefill_p50_ms,prefill_p95_ms,prefill_p99_ms,\
                   kv_transfer_p50_ms,tpot_p50_ms,tpot_p95_ms,tpot_p99_ms,\
-                  total_energy_kj,mean_power_kw,energy_per_token_mj,energy_per_request_j"
+                  total_energy_kj,mean_power_kw,energy_per_token_mj,energy_per_request_j,\
+                  total_cost_usd,cost_per_million_tokens_usd,cost_per_request_usd,cluster_cost_per_hour_usd"
         );
     }
 
     pub fn print_csv_row(&self) {
-        println!("{},{},{},{},{},{},{},{},{:.2},{:.0},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.2},{:.3},{:.2},{:.2}",
+        println!(
+            "{},{},{},{},{},{},{},{},{:.2},{:.0},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.2},{:.3},{:.2},{:.2},{:.4},{:.3},{:.6},{:.2}",
             self.model, self.gpu, self.scheduler, self.tp, self.pp, self.disaggregate,
             self.arrival_rate, self.completions,
             self.throughput_rps, self.token_throughput, self.kv_util_mean_pct,
@@ -110,6 +127,8 @@ impl RunSummary {
             self.prefill_p50_ms, self.prefill_p95_ms, self.prefill_p99_ms,
             self.kv_transfer_p50_ms,
             self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms,
-            self.total_energy_kj, self.mean_power_kw, self.energy_per_token_mj, self.energy_per_request_j);
+            self.total_energy_kj, self.mean_power_kw, self.energy_per_token_mj, self.energy_per_request_j,
+            self.total_cost_usd, self.cost_per_million_tokens_usd, self.cost_per_request_usd, self.cluster_cost_per_hour_usd,
+        );
     }
 }

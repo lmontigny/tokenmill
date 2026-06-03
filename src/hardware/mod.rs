@@ -1,4 +1,5 @@
 pub mod cluster;
+pub mod cost;
 pub mod gpu;
 pub mod groq;
 pub mod kernel_table;

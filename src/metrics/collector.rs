@@ -1,7 +1,7 @@
 use hdrhistogram::Histogram;
 
 use super::report::RunSummary;
-use crate::hardware::power;
+use crate::hardware::{cost, power};
 
 pub struct MetricsCollector {
     ttft: Histogram<u64>,        // microseconds — arrival → first output token
@@ -117,23 +117,35 @@ impl MetricsCollector {
         scheduler: &str,
         tp: u32,
         pp: u32,
+        ep: u32,
         disaggregate: bool,
         arrival_rate: f64,
         latency_mode: &str,
         tdp_watts: f64,
+        cost_per_hour_usd: f64,
     ) -> RunSummary {
         let throughput = self.completions as f64 / self.sim_duration.max(1e-9);
         let tok_throughput = self.tokens_generated as f64 / self.sim_duration.max(1e-9);
 
-        // Total chips = TP × PP per pool, doubled if prefill / decode pools are disaggregated.
+        // Total chips per pool = max(TP, EP) × PP. TP and EP commonly share the same set
+        // of GPUs (TP=8 EP=8 = 8 chips), but TP=1 EP=4 means 4 chips (experts sharded but
+        // attention replicated). Doubled if prefill / decode pools are disaggregated.
         let pools = if disaggregate { 2u32 } else { 1 };
-        let n_chips = tp.saturating_mul(pp).saturating_mul(pools);
+        let chips_per_pool = tp.max(ep).saturating_mul(pp);
+        let n_chips = chips_per_pool.saturating_mul(pools);
         let pr = power::compute_report(
             self.prefill_busy_secs,
             self.decode_busy_secs,
             self.sim_duration,
             n_chips,
             tdp_watts,
+            self.tokens_generated,
+            self.completions,
+        );
+        let cr = cost::compute_report(
+            self.sim_duration,
+            n_chips,
+            cost_per_hour_usd,
             self.tokens_generated,
             self.completions,
         );
@@ -168,6 +180,10 @@ impl MetricsCollector {
             mean_power_kw: pr.mean_power_w / 1000.0,
             energy_per_token_mj: pr.energy_per_token_mj,
             energy_per_request_j: pr.energy_per_request_j,
+            total_cost_usd: cr.total_cost_usd,
+            cost_per_million_tokens_usd: cr.cost_per_million_tokens_usd,
+            cost_per_request_usd: cr.cost_per_request_usd,
+            cluster_cost_per_hour_usd: cr.cluster_cost_per_hour_usd,
         }
     }
 

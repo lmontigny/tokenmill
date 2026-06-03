@@ -34,6 +34,11 @@ pub struct GpuSpec {
     /// Default 0 disables power reporting.
     #[serde(default)]
     pub tdp_watts: f64,
+    /// On-demand list price per chip per hour, in US dollars. Used to compute
+    /// $ / 1M tokens and $ / request. Reflects approximate 2026 cloud rates
+    /// (AWS / GCP / Lambda / Vultr / etc.). Set to 0 to disable cost reporting.
+    #[serde(default)]
+    pub cost_per_hour_usd: f64,
     pub mfu_prefill: f64,
     pub mfu_decode: f64,
 }
@@ -219,6 +224,7 @@ impl GpuSpec {
                 scale_up_bandwidth: 1800e9,       // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
                 scale_up_latency: 1e-6,           // NVSwitch hop ~1 µs
                 tdp_watts: 1000.0,                // B200 SXM TDP 1 kW
+                cost_per_hour_usd: 6.50,          // 2026 on-demand estimate (limited availability)
                 mfu_prefill: 0.70, // slightly lower than H100 — new gen, real-world kernels less mature
                 mfu_decode: 0.75,
             }),
@@ -230,8 +236,9 @@ impl GpuSpec {
                 memory_capacity: 80_000_000_000,
                 on_chip_sram: 50_000_000, // 50 MB L2
                 scale_up_bandwidth: 900e9,
-                scale_up_latency: 1e-6, // NVSwitch hop ~1 µs
-                tdp_watts: 700.0,       // H100 SXM5
+                scale_up_latency: 1e-6,  // NVSwitch hop ~1 µs
+                tdp_watts: 700.0,        // H100 SXM5
+                cost_per_hour_usd: 3.50, // AWS p5 / Lambda / GCP on-demand ≈ $3-4
                 mfu_prefill: 0.75,
                 mfu_decode: 0.80,
             }),
@@ -245,6 +252,7 @@ impl GpuSpec {
                 scale_up_bandwidth: 600e9,
                 scale_up_latency: 1.5e-6, // NVLink 3 hop ~1.5 µs
                 tdp_watts: 400.0,         // A100 80GB SXM
+                cost_per_hour_usd: 2.50,  // AWS p4 / GCP on-demand ≈ $2-3
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
             }),
@@ -262,6 +270,7 @@ impl GpuSpec {
                 scale_up_bandwidth: 896e9, // Infinity Fabric: 896 GB/s aggregate per GPU
                 scale_up_latency: 1.2e-6, // IF hop ~1.2 µs
                 tdp_watts: 750.0,         // MI300X
+                cost_per_hour_usd: 3.50,  // Vultr / MicroCloud / Hot Aisle on-demand ≈ $3-4
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -275,7 +284,8 @@ impl GpuSpec {
                 on_chip_sram: 256_000_000,
                 scale_up_bandwidth: 896e9,
                 scale_up_latency: 1.2e-6,
-                tdp_watts: 1000.0, // MI325X TDP 1 kW
+                tdp_watts: 1000.0,       // MI325X TDP 1 kW
+                cost_per_hour_usd: 4.50, // newer/limited availability
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -290,6 +300,7 @@ impl GpuSpec {
                 scale_up_bandwidth: 1075e9, // Infinity Fabric Gen 4: 1.075 TB/s
                 scale_up_latency: 1e-6,     // IF Gen 4 hop ~1 µs
                 tdp_watts: 1400.0,          // MI355X 1.4 kW
+                cost_per_hour_usd: 6.00,    // estimated 2026 on-demand
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -301,8 +312,9 @@ impl GpuSpec {
                 memory_capacity: 24_000_000_000,
                 on_chip_sram: 6_000_000, // 6 MB L2
                 scale_up_bandwidth: 0.0,
-                scale_up_latency: 0.0, // no scale-up fabric (single-GPU card)
-                tdp_watts: 300.0,      // A10G
+                scale_up_latency: 0.0,   // no scale-up fabric (single-GPU card)
+                tdp_watts: 300.0,        // A10G
+                cost_per_hour_usd: 1.20, // AWS g5.2xl ≈ $1.20/hr
                 mfu_prefill: 0.55,
                 mfu_decode: 0.65,
             }),
