@@ -1,21 +1,21 @@
 # tokenmill
 
 A discrete-event simulator for LLM inference clusters, written in Rust.
-Predicts latency, throughput, energy, and **$ per million tokens** for any
-combination of model / hardware / parallelism / scheduler — useful for capacity
-planning, hardware shortlisting, and what-if analysis *before* you provision
-the GPUs.
+Useful for capacity planning, hardware shortlisting, and what-if analysis
+before you provision the GPUs.
 
 **Built-in support for:**
 - **Schedulers** — continuous batching (Orca), chunked prefill (Sarathi), preemption / recompute
 - **Parallelism** — tensor (TP), pipeline (PP), expert (EP), disaggregated prefill/decode
 - **Speedups** — speculative decoding, multi-token prediction, paged KV cache, MLA KV compression
 - **Models** — dense (Llama 8B / 70B + FP8) and MoE (Mixtral, Llama 4 Maverick / Behemoth, DeepSeek V3, Kimi K2 1 T)
-- **Hardware** — NVIDIA `b200` / `h100` / `a100` / `a10g`, AMD `mi300x` / `mi325x` / `mi355x`, Google TPU `v7-ironwood` / `8t` / `8i`, Groq `lpu-v1`
-- **Reporting** — TTFT / TPOT histograms, KV utilization, **energy (J)**, **mean power (kW)**, **cost ($ / Mtok)**
+- **Hardware** — NVIDIA b200 / h100 / a100 / a10g, AMD mi300x / mi325x / mi355x, Google TPU v7-ironwood / 8t / 8i, Groq lpu-v1
+- **Latency prediction** — TTFT / TPOT histograms (p50 / p95 / p99), throughput, KV utilization, preemption counts
+- **Energy prediction** — per-chip TDP model, total kJ, mean kW, energy per output token
+- **Cost prediction** — GPU-hour pricing, total $, $ per million tokens, $ per request
 
-Targets **~10% error** vs real GPU kernel time on validated configs (see [docs/validation.md](docs/validation.md)).
-All collective formulas assume one scale-up domain — **a single rack or pod** —
+Targets ~10% error vs real GPU kernel time on validated configs (see [docs/validation.md](docs/validation.md)).
+All collective formulas assume one scale-up domain — a single rack or pod —
 using NVLink / Infinity Fabric / TPU ICI / Groq C2C. Cross-rack DCN traffic is
 not modelled; see [docs/topology.md](docs/topology.md) for what's in scope.
 
