@@ -11,16 +11,29 @@ pub struct GpuSpec {
     pub flops_bf16: f64, // peak BF16 FLOPS (e.g. 989e12 for H100)
     #[serde(default)]
     pub flops_fp8: f64, // peak FP8 FLOPS (e.g. 1978e12 for H100; 0 = same as bf16)
-    pub hbm_bandwidth: f64, // bytes/sec (e.g. 3.35e12 for H100)
-    pub hbm_capacity: u64, // bytes
-    /// On-chip SRAM per accelerator (L2 cache on NVIDIA/AMD, Vmem scratchpad on TPU).
+    /// Main memory bandwidth in bytes/sec. HBM on NVIDIA/AMD/TPU; on-chip SRAM
+    /// bandwidth on SRAM-only architectures like Groq.
+    pub memory_bandwidth: f64,
+    /// Main memory capacity in bytes per chip.
+    pub memory_capacity: u64,
+    /// Faster on-chip memory tier (L2 cache on NVIDIA/AMD, Vmem scratchpad on TPU).
     /// When the per-chip KV working set fits in this budget, decode KV traffic is
-    /// largely served from SRAM (~10× faster than HBM) instead of HBM. This is a
-    /// major TPU 8i advantage at 384 MB vs ~50-100 MB on contemporary GPUs.
-    /// Default 0 disables SRAM caching (conservative, equivalent to old behaviour).
+    /// served from SRAM at ~10× the cost of main memory. Set to 0 on SRAM-only
+    /// architectures where there's no faster tier (the "memory" IS the SRAM).
     #[serde(default)]
     pub on_chip_sram: u64,
-    pub nvlink_bandwidth: f64, // bytes/sec per direction
+    /// Scale-up fabric bandwidth per direction (NVLink, Infinity Fabric, TPU ICI, Groq C2C).
+    pub scale_up_bandwidth: f64,
+    /// Per-hop latency on the scale-up fabric in seconds. Dominates collective cost at
+    /// very high TP. Typical values: NVLink/IF ~1 µs, TPU ICI ~500 ns, Groq C2C ~100 ns.
+    /// 0 = pure bandwidth model (the pre-existing behaviour).
+    #[serde(default)]
+    pub scale_up_latency: f64,
+    /// Peak power draw per chip in watts (TDP). Used by `hardware::power` to
+    /// compute energy/avg-power metrics from per-GPU prefill / decode busy time.
+    /// Default 0 disables power reporting.
+    #[serde(default)]
+    pub tdp_watts: f64,
     pub mfu_prefill: f64,
     pub mfu_decode: f64,
 }
@@ -190,7 +203,7 @@ impl GpuSpec {
         };
 
         let bytes_per_gpu = weight_bytes_per_chip + kv_effective_bytes;
-        bytes_per_gpu as f64 / (self.hbm_bandwidth * self.mfu_decode)
+        bytes_per_gpu as f64 / (self.memory_bandwidth * self.mfu_decode)
     }
 
     pub fn preset(name: &str) -> Option<Self> {
@@ -198,12 +211,14 @@ impl GpuSpec {
             // NVIDIA Blackwell B200 SXM (NVL72/HGX). FP4 not modeled — listed for reference: 9000 TFLOPS dense.
             "b200" => Some(Self {
                 name: "B200-SXM".into(),
-                flops_bf16: 2250e12,           // 2.25 PFLOPS dense BF16/FP16
-                flops_fp8: 4500e12,            // 4.5 PFLOPS dense FP8 (2× H100)
-                hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e (2.4× H100)
-                hbm_capacity: 192_000_000_000, // 192 GB HBM3e
-                on_chip_sram: 100_000_000,     // ~100 MB L2 (estimate)
-                nvlink_bandwidth: 1800e9,      // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
+                flops_bf16: 2250e12,              // 2.25 PFLOPS dense BF16/FP16
+                flops_fp8: 4500e12,               // 4.5 PFLOPS dense FP8 (2× H100)
+                memory_bandwidth: 8.0e12,         // 8 TB/s HBM3e (2.4× H100)
+                memory_capacity: 192_000_000_000, // 192 GB HBM3e
+                on_chip_sram: 100_000_000,        // ~100 MB L2 (estimate)
+                scale_up_bandwidth: 1800e9,       // NVLink 5: 1.8 TB/s aggregate (2× H100 NVLink 4)
+                scale_up_latency: 1e-6,           // NVSwitch hop ~1 µs
+                tdp_watts: 1000.0,                // B200 SXM TDP 1 kW
                 mfu_prefill: 0.70, // slightly lower than H100 — new gen, real-world kernels less mature
                 mfu_decode: 0.75,
             }),
@@ -211,10 +226,12 @@ impl GpuSpec {
                 name: "H100-SXM5".into(),
                 flops_bf16: 989e12,
                 flops_fp8: 1978e12,
-                hbm_bandwidth: 3.35e12,
-                hbm_capacity: 80_000_000_000,
+                memory_bandwidth: 3.35e12,
+                memory_capacity: 80_000_000_000,
                 on_chip_sram: 50_000_000, // 50 MB L2
-                nvlink_bandwidth: 900e9,
+                scale_up_bandwidth: 900e9,
+                scale_up_latency: 1e-6, // NVSwitch hop ~1 µs
+                tdp_watts: 700.0,       // H100 SXM5
                 mfu_prefill: 0.75,
                 mfu_decode: 0.80,
             }),
@@ -222,25 +239,29 @@ impl GpuSpec {
                 name: "A100-80GB".into(),
                 flops_bf16: 312e12,
                 flops_fp8: 0.0, // A100 does not have FP8 tensor cores
-                hbm_bandwidth: 2.0e12,
-                hbm_capacity: 80_000_000_000,
+                memory_bandwidth: 2.0e12,
+                memory_capacity: 80_000_000_000,
                 on_chip_sram: 40_000_000, // 40 MB L2
-                nvlink_bandwidth: 600e9,
+                scale_up_bandwidth: 600e9,
+                scale_up_latency: 1.5e-6, // NVLink 3 hop ~1.5 µs
+                tdp_watts: 400.0,         // A100 80GB SXM
                 mfu_prefill: 0.75,
                 mfu_decode: 0.75,
             }),
             // (Google TPU presets live in `tpu.rs` and are picked up by the fall-through below.)
             // AMD Instinct MI300X (CDNA 3, 2023) — H100 competitor with 2.4× more HBM at 1.6× BW.
-            // Infinity Fabric stored in `nvlink_bandwidth` (scale-up fabric is treated uniformly).
+            // Infinity Fabric stored in `scale_up_bandwidth` (scale-up fabric is treated uniformly).
             // MFU is conservative vs H100 — ROCm/vLLM kernel maturity gap.
             "mi300x" => Some(Self {
                 name: "MI300X".into(),
-                flops_bf16: 1307e12,           // 1.307 PFLOPS BF16 matrix (dense)
-                flops_fp8: 2614e12,            // 2.614 PFLOPS FP8 matrix (dense)
-                hbm_bandwidth: 5.3e12,         // 5.3 TB/s HBM3 (1.58× H100)
-                hbm_capacity: 192_000_000_000, // 192 GB HBM3
-                on_chip_sram: 256_000_000,     // ~256 MB Infinity Cache + L2
-                nvlink_bandwidth: 896e9,       // Infinity Fabric: 896 GB/s aggregate per GPU
+                flops_bf16: 1307e12,      // 1.307 PFLOPS BF16 matrix (dense)
+                flops_fp8: 2614e12,       // 2.614 PFLOPS FP8 matrix (dense)
+                memory_bandwidth: 5.3e12, // 5.3 TB/s HBM3 (1.58× H100)
+                memory_capacity: 192_000_000_000, // 192 GB HBM3
+                on_chip_sram: 256_000_000, // ~256 MB Infinity Cache + L2
+                scale_up_bandwidth: 896e9, // Infinity Fabric: 896 GB/s aggregate per GPU
+                scale_up_latency: 1.2e-6, // IF hop ~1.2 µs
+                tdp_watts: 750.0,         // MI300X
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -249,22 +270,26 @@ impl GpuSpec {
                 name: "MI325X".into(),
                 flops_bf16: 1307e12,
                 flops_fp8: 2614e12,
-                hbm_bandwidth: 6.0e12,         // 6.0 TB/s HBM3e
-                hbm_capacity: 256_000_000_000, // 256 GB HBM3e
+                memory_bandwidth: 6.0e12,         // 6.0 TB/s HBM3e
+                memory_capacity: 256_000_000_000, // 256 GB HBM3e
                 on_chip_sram: 256_000_000,
-                nvlink_bandwidth: 896e9,
+                scale_up_bandwidth: 896e9,
+                scale_up_latency: 1.2e-6,
+                tdp_watts: 1000.0, // MI325X TDP 1 kW
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
             // AMD Instinct MI355X (CDNA 4, 2025) — B200 competitor. FP4/FP6 not modeled.
             "mi355x" => Some(Self {
                 name: "MI355X".into(),
-                flops_bf16: 2500e12,           // ~2.5 PFLOPS BF16 dense
-                flops_fp8: 5000e12,            // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
-                hbm_bandwidth: 8.0e12,         // 8 TB/s HBM3e
-                hbm_capacity: 288_000_000_000, // 288 GB HBM3e (50% more than B200)
+                flops_bf16: 2500e12,              // ~2.5 PFLOPS BF16 dense
+                flops_fp8: 5000e12,               // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
+                memory_bandwidth: 8.0e12,         // 8 TB/s HBM3e
+                memory_capacity: 288_000_000_000, // 288 GB HBM3e (50% more than B200)
                 on_chip_sram: 256_000_000,
-                nvlink_bandwidth: 1075e9, // Infinity Fabric Gen 4: 1.075 TB/s
+                scale_up_bandwidth: 1075e9, // Infinity Fabric Gen 4: 1.075 TB/s
+                scale_up_latency: 1e-6,     // IF Gen 4 hop ~1 µs
+                tdp_watts: 1400.0,          // MI355X 1.4 kW
                 mfu_prefill: 0.65,
                 mfu_decode: 0.72,
             }),
@@ -272,10 +297,12 @@ impl GpuSpec {
                 name: "A10G".into(),
                 flops_bf16: 125e12,
                 flops_fp8: 0.0, // A10G does not have FP8 tensor cores
-                hbm_bandwidth: 600e9,
-                hbm_capacity: 24_000_000_000,
+                memory_bandwidth: 600e9,
+                memory_capacity: 24_000_000_000,
                 on_chip_sram: 6_000_000, // 6 MB L2
-                nvlink_bandwidth: 0.0,
+                scale_up_bandwidth: 0.0,
+                scale_up_latency: 0.0, // no scale-up fabric (single-GPU card)
+                tdp_watts: 300.0,      // A10G
                 mfu_prefill: 0.55,
                 mfu_decode: 0.65,
             }),

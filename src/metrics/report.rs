@@ -36,6 +36,12 @@ pub struct RunSummary {
     pub tpot_p50_ms: f64,
     pub tpot_p95_ms: f64,
     pub tpot_p99_ms: f64,
+
+    // power / energy (0.0 when the GPU preset has no tdp_watts)
+    pub total_energy_kj: f64,
+    pub mean_power_kw: f64,
+    pub energy_per_token_mj: f64,
+    pub energy_per_request_j: f64,
 }
 
 impl RunSummary {
@@ -67,6 +73,16 @@ impl RunSummary {
             "TPOT (ms)           p50={:.1}  p95={:.1}  p99={:.1}",
             self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms
         );
+        if self.total_energy_kj > 0.0 {
+            println!();
+            println!(
+                "Energy              total={:.2} kJ   mean={:.2} kW   per-token={:.2} mJ   per-req={:.1} J",
+                self.total_energy_kj,
+                self.mean_power_kw,
+                self.energy_per_token_mj,
+                self.energy_per_request_j
+            );
+        }
     }
 
     pub fn print_json(&self) {
@@ -80,18 +96,20 @@ impl RunSummary {
                   throughput_rps,token_throughput,kv_util_mean_pct,\
                   ttft_p50_ms,ttft_p95_ms,ttft_p99_ms,\
                   prefill_p50_ms,prefill_p95_ms,prefill_p99_ms,\
-                  kv_transfer_p50_ms,tpot_p50_ms,tpot_p95_ms,tpot_p99_ms"
+                  kv_transfer_p50_ms,tpot_p50_ms,tpot_p95_ms,tpot_p99_ms,\
+                  total_energy_kj,mean_power_kw,energy_per_token_mj,energy_per_request_j"
         );
     }
 
     pub fn print_csv_row(&self) {
-        println!("{},{},{},{},{},{},{},{},{:.2},{:.0},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1}",
+        println!("{},{},{},{},{},{},{},{},{:.2},{:.0},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.1},{:.2},{:.3},{:.2},{:.2}",
             self.model, self.gpu, self.scheduler, self.tp, self.pp, self.disaggregate,
             self.arrival_rate, self.completions,
             self.throughput_rps, self.token_throughput, self.kv_util_mean_pct,
             self.ttft_p50_ms, self.ttft_p95_ms, self.ttft_p99_ms,
             self.prefill_p50_ms, self.prefill_p95_ms, self.prefill_p99_ms,
             self.kv_transfer_p50_ms,
-            self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms);
+            self.tpot_p50_ms, self.tpot_p95_ms, self.tpot_p99_ms,
+            self.total_energy_kj, self.mean_power_kw, self.energy_per_token_mj, self.energy_per_request_j);
     }
 }

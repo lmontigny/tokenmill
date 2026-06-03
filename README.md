@@ -48,6 +48,7 @@ cargo run --release -- \
 - **[Traces](docs/traces.md)** — public trace sources and the fetch script
 - **[Example results](docs/results.md)** — 14 representative simulation runs
 - **[Benchmark validation](docs/validation.md)** — MAPE vs real NVIDIA GPUs
+- **[Power and energy](docs/power.md)** — per-chip TDP model, energy per token
 - **[Architecture](docs/architecture.md)** — module layout and DES engine
 - **[Roadmap](docs/roadmap.md)** — phase history
 

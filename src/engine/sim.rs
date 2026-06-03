@@ -338,6 +338,7 @@ impl Simulator {
                 .prefill_latency(1, chunk_tokens, &self.model, kt, &self.cluster);
         let done_time = start + latency;
         self.prefill_gpu.busy_until = done_time;
+        self.metrics.add_prefill_busy(latency);
         vec![(done_time, EventPayload::PrefillDone { req_id, gpu_id })]
     }
 
@@ -486,6 +487,7 @@ impl Simulator {
         let start = self.decode_gpu_busy_until().max(self.clock);
         let done_time = start + latency;
         self.set_decode_gpu_busy(done_time);
+        self.metrics.add_decode_busy(latency);
 
         // Advance all decoding requests by tokens_per_step.
         let advance = tokens_per_step.round().max(1.0) as u32;

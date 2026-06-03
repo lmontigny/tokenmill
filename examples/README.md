@@ -22,3 +22,4 @@ bash examples/02_chunked_prefill_under_load.sh
 | 12 | `12_frontier_kimi_k2.sh` | Kimi K2 (1 T MoE) — trillion-param frontier on 8×B200 |
 | 13 | `13_google_tpu_v8i.sh` | Google TPU v8i (2026 projected) — Kimi K2 on 3D-torus pod |
 | 14 | `14_groq_lpu.sh` | Groq LPU v1 — SRAM-only, 64 chips for llama-8b-fp8 |
+| 15 | `15_power_analysis.sh` | Arrival-rate sweep with energy per token — idle vs active power tradeoff |

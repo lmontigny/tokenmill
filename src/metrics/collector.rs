@@ -1,6 +1,7 @@
 use hdrhistogram::Histogram;
 
 use super::report::RunSummary;
+use crate::hardware::power;
 
 pub struct MetricsCollector {
     ttft: Histogram<u64>,        // microseconds — arrival → first output token
@@ -15,6 +16,11 @@ pub struct MetricsCollector {
     kv_util_samples: u64,
     pub kv_util_final: f64,
     pub disaggregated: bool,
+    /// Sum across the prefill pool of seconds the GPU(s) were doing prefill compute.
+    /// Multiplied by `n_prefill_chips` already if more than one prefill GPU runs in parallel.
+    pub prefill_busy_secs: f64,
+    /// Same for decode. In aggregated mode this counts the single GPU's decode time.
+    pub decode_busy_secs: f64,
 }
 
 impl Default for MetricsCollector {
@@ -38,6 +44,20 @@ impl MetricsCollector {
             kv_util_samples: 0,
             kv_util_final: 0.0,
             disaggregated: false,
+            prefill_busy_secs: 0.0,
+            decode_busy_secs: 0.0,
+        }
+    }
+
+    pub fn add_prefill_busy(&mut self, secs: f64) {
+        if secs > 0.0 {
+            self.prefill_busy_secs += secs;
+        }
+    }
+
+    pub fn add_decode_busy(&mut self, secs: f64) {
+        if secs > 0.0 {
+            self.decode_busy_secs += secs;
         }
     }
 
@@ -100,9 +120,23 @@ impl MetricsCollector {
         disaggregate: bool,
         arrival_rate: f64,
         latency_mode: &str,
+        tdp_watts: f64,
     ) -> RunSummary {
         let throughput = self.completions as f64 / self.sim_duration.max(1e-9);
         let tok_throughput = self.tokens_generated as f64 / self.sim_duration.max(1e-9);
+
+        // Total chips = TP × PP per pool, doubled if prefill / decode pools are disaggregated.
+        let pools = if disaggregate { 2u32 } else { 1 };
+        let n_chips = tp.saturating_mul(pp).saturating_mul(pools);
+        let pr = power::compute_report(
+            self.prefill_busy_secs,
+            self.decode_busy_secs,
+            self.sim_duration,
+            n_chips,
+            tdp_watts,
+            self.tokens_generated,
+            self.completions,
+        );
         RunSummary {
             model: model.into(),
             gpu: gpu.into(),
@@ -130,6 +164,10 @@ impl MetricsCollector {
             tpot_p50_ms: Self::pct(&self.tpot, 0.50),
             tpot_p95_ms: Self::pct(&self.tpot, 0.95),
             tpot_p99_ms: Self::pct(&self.tpot, 0.99),
+            total_energy_kj: pr.total_energy_j / 1000.0,
+            mean_power_kw: pr.mean_power_w / 1000.0,
+            energy_per_token_mj: pr.energy_per_token_mj,
+            energy_per_request_j: pr.energy_per_request_j,
         }
     }
 

@@ -154,8 +154,8 @@ fn auto_kv_blocks(
 ) -> u32 {
     let n_gpus = (tp * pp).max(1) as u64;
     let weight_per_gpu = model.weight_bytes / n_gpus;
-    let hbm = gpu_spec.hbm_capacity as f64;
-    let available_per_gpu = if weight_per_gpu < gpu_spec.hbm_capacity {
+    let hbm = gpu_spec.memory_capacity as f64;
+    let available_per_gpu = if weight_per_gpu < gpu_spec.memory_capacity {
         (hbm - weight_per_gpu as f64) * 0.80
     } else {
         hbm * 0.20
@@ -202,7 +202,7 @@ fn print_model_card(args: &Args) {
 
     let n_gpus = (args.tp * args.pp).max(1) as u64;
     let weight_per_gpu = model.weight_bytes / n_gpus;
-    let fits = weight_per_gpu < gpu.hbm_capacity;
+    let fits = weight_per_gpu < gpu.memory_capacity;
 
     let kv_total_blocks = if args.kv_blocks > 0 {
         args.kv_blocks
@@ -304,7 +304,7 @@ fn print_model_card(args: &Args) {
     };
     println!(
         "  HBM per GPU    {}  ({:.0} TFLOPS {} peak)",
-        fmt_bytes(gpu.hbm_capacity),
+        fmt_bytes(gpu.memory_capacity),
         peak_flops / 1e12,
         dtype_tag
     );
@@ -313,15 +313,16 @@ fn print_model_card(args: &Args) {
         format!(
             "✓ fits  ({}/GPU < {} HBM)",
             fmt_bytes(weight_per_gpu),
-            fmt_bytes(gpu.hbm_capacity)
+            fmt_bytes(gpu.memory_capacity)
         )
     } else {
-        let min_tp =
-            ((model.weight_bytes as f64 / (gpu.hbm_capacity as f64 * 0.85)).ceil() as u32).max(2);
+        let min_tp = ((model.weight_bytes as f64 / (gpu.memory_capacity as f64 * 0.85)).ceil()
+            as u32)
+            .max(2);
         format!(
             "✗ EXCEEDS HBM  ({}/GPU > {} HBM)  — use --tp {} or higher",
             fmt_bytes(weight_per_gpu),
-            fmt_bytes(gpu.hbm_capacity),
+            fmt_bytes(gpu.memory_capacity),
             min_tp
         )
     };
@@ -444,7 +445,8 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         tp: args.tp,
         pp: args.pp,
         ep: args.ep,
-        nvlink_bw: gpu_spec.nvlink_bandwidth,
+        scale_up_bw: gpu_spec.scale_up_bandwidth,
+        scale_up_latency: gpu_spec.scale_up_latency,
         internode_bw: args.internode_bw_gbps * 1e9,
         disaggregate: args.disaggregate,
     };
@@ -565,6 +567,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         args.disaggregate,
         arrival_rate,
         latency_mode,
+        gpu_spec.tdp_watts,
     )
 }
 

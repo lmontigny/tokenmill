@@ -52,5 +52,5 @@ When TP = EP (e.g. TP=8, EP=8) per-GPU BW is the same as EP=1. The difference ap
 expert_activations = batch_tokens × top_K            ← each token fans out to top_K experts
 tokens_per_gpu     = expert_activations / ep
 data_per_gpu       = (ep-1)/ep × tokens_per_gpu × d_model × dtype_bytes
-latency            = data_per_gpu / nvlink_bw         ← full bisection BW on NVSwitch
+latency            = data_per_gpu / scale_up_bw         ← full bisection BW on NVSwitch
 ```

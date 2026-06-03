@@ -4,8 +4,8 @@
 //! in two important ways:
 //!
 //! 1. **No HBM.** All weights and activations live in on-chip SRAM. The
-//!    `hbm_bandwidth` field carries the SRAM bandwidth (~80 TB/s) and
-//!    `hbm_capacity` is the SRAM size (~230 MB on GroqChip 1) — orders of
+//!    `memory_bandwidth` field carries the SRAM bandwidth (~80 TB/s) and
+//!    `memory_capacity` is the SRAM size (~230 MB on GroqChip 1) — orders of
 //!    magnitude smaller than any GPU. Any non-trivial model needs very high
 //!    `--tp` (e.g. llama-70b-fp8 at TP ≈ 358) just to fit the weights.
 //!
@@ -35,11 +35,16 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             name: "GroqChip-1".into(),
             flops_bf16: 188e12, // 188 TFLOPS FP16 (BF16-equivalent for the roofline)
             flops_fp8: 375e12,  // FP8 ≈ 2× FP16; INT8 is 750 TOPS (Groq's primary serving dtype)
-            hbm_bandwidth: 80e12, // 80 TB/s on-chip SRAM (THE memory; no off-chip DRAM)
-            hbm_capacity: 230_000_000, // 230 MB — tiny vs GPU; high `--tp` is mandatory
+            memory_bandwidth: 80e12, // 80 TB/s on-chip SRAM (THE memory; no off-chip DRAM)
+            memory_capacity: 230_000_000, // 230 MB — tiny vs GPU; high `--tp` is mandatory
             on_chip_sram: 0,    // No two-tier memory: HBM field already IS the SRAM
-            nvlink_bandwidth: 400e9, // C2C: 16 ports × ~25 GB/s aggregate per chip (approx.)
-            mfu_prefill: 0.85,  // Deterministic compiler-scheduled execution → very high util
+            scale_up_bandwidth: 400e9, // C2C: 16 ports × ~25 GB/s aggregate per chip (approx.)
+            // Per-hop C2C latency ~100 ns — this is what lets the simulator capture
+            // why Groq's real TPOT at TP=358 is dominated by the chip-mesh diameter,
+            // not by SRAM bandwidth (which is essentially infinite for this purpose).
+            scale_up_latency: 100e-9,
+            tdp_watts: 215.0,  // GroqChip 1 — published typical (peak ~300W)
+            mfu_prefill: 0.85, // Deterministic compiler-scheduled execution → very high util
             mfu_decode: 0.90,
         }),
         _ => None,

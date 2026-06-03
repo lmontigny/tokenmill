@@ -55,11 +55,11 @@ fn ep_shards_expert_weights() {
     let model = LlmConfig::preset("deepseek-v3").unwrap();
 
     let mut ep1 = ClusterConfig::single_gpu();
-    ep1.nvlink_bw = gpu.nvlink_bandwidth;
+    ep1.scale_up_bw = gpu.scale_up_bandwidth;
 
     let mut ep8 = ClusterConfig::single_gpu();
     ep8.ep = 8;
-    ep8.nvlink_bw = gpu.nvlink_bandwidth;
+    ep8.scale_up_bw = gpu.scale_up_bandwidth;
 
     let t_ep1 = gpu.decode_latency(1, 256, &model, None, &ep1);
     let t_ep8 = gpu.decode_latency(1, 256, &model, None, &ep8);
@@ -103,7 +103,7 @@ fn behemoth_active_params_dominate_decode_cost() {
     let mut c = ClusterConfig::single_gpu();
     c.tp = 16;
     c.ep = 16;
-    c.nvlink_bw = gpu.nvlink_bandwidth;
+    c.scale_up_bw = gpu.scale_up_bandwidth;
 
     let t_k2 = gpu.decode_latency(1, 256, &k2, None, &c);
     let t_beh = gpu.decode_latency(1, 256, &beh, None, &c);
@@ -119,7 +119,7 @@ fn behemoth_active_params_dominate_decode_cost() {
 #[test]
 fn ep_all_to_all_zero_when_ep_eq_one() {
     let mut c = ClusterConfig::single_gpu();
-    c.nvlink_bw = 900e9;
+    c.scale_up_bw = 900e9;
     c.ep = 1;
     assert_eq!(c.ep_all_to_all_latency(1024, 4096, 2), 0.0);
 }
@@ -127,7 +127,7 @@ fn ep_all_to_all_zero_when_ep_eq_one() {
 #[test]
 fn ep_all_to_all_scales_with_token_count() {
     let mut c = ClusterConfig::single_gpu();
-    c.nvlink_bw = 900e9;
+    c.scale_up_bw = 900e9;
     c.ep = 8;
 
     let small = c.ep_all_to_all_latency(64, 4096, 2);

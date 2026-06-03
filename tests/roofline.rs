@@ -70,7 +70,7 @@ fn tp_scales_decode_inversely_with_degree() {
     let tp1 = ClusterConfig::single_gpu();
     let mut tp4 = ClusterConfig::single_gpu();
     tp4.tp = 4;
-    tp4.nvlink_bw = gpu.nvlink_bandwidth;
+    tp4.scale_up_bw = gpu.scale_up_bandwidth;
 
     let t1 = gpu.decode_latency(1, 256, &model, None, &tp1);
     let t4 = gpu.decode_latency(1, 256, &model, None, &tp4);
@@ -159,8 +159,8 @@ fn tpu_8i_has_larger_hbm_than_b200() {
     // 288 GB vs 192 GB — key advantage for fitting big MoE on fewer chips.
     let b200 = GpuSpec::preset("b200").unwrap();
     let tpu = GpuSpec::preset("tpu-v8i").unwrap();
-    assert!(tpu.hbm_capacity > b200.hbm_capacity);
-    assert_eq!(tpu.hbm_capacity, 288_000_000_000);
+    assert!(tpu.memory_capacity > b200.memory_capacity);
+    assert_eq!(tpu.memory_capacity, 288_000_000_000);
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn tpu_8i_sram_helps_small_batch_kv() {
     let mut c = ClusterConfig::single_gpu();
     c.tp = 8;
     c.ep = 8;
-    c.nvlink_bw = tpu.nvlink_bandwidth;
+    c.scale_up_bw = tpu.scale_up_bandwidth;
 
     let with_sram = tpu.decode_latency(4, 1024, &model, None, &c);
     let no_sram = tpu_no_sram.decode_latency(4, 1024, &model, None, &c);
@@ -197,9 +197,9 @@ fn groq_chip_is_sram_only_with_tiny_capacity() {
     // The "HBM" fields represent that on-chip memory; on_chip_sram=0 because
     // it would otherwise double-count (the HBM IS the SRAM).
     let groq = GpuSpec::preset("groq-lpu-v1").unwrap();
-    assert_eq!(groq.hbm_capacity, 230_000_000);
+    assert_eq!(groq.memory_capacity, 230_000_000);
     assert!(
-        (groq.hbm_bandwidth - 80e12).abs() < 1e6,
+        (groq.memory_bandwidth - 80e12).abs() < 1e6,
         "expected 80 TB/s SRAM BW"
     );
     assert_eq!(groq.on_chip_sram, 0);
@@ -213,7 +213,7 @@ fn groq_needs_high_tp_for_large_models() {
     let model = LlmConfig::preset("llama-70b-fp8").unwrap();
     let mut c = ClusterConfig::single_gpu();
     c.tp = 358;
-    c.nvlink_bw = groq.nvlink_bandwidth;
+    c.scale_up_bw = groq.scale_up_bandwidth;
 
     // At TP=358, per-chip weights ≈ 195 MB — fits in 230 MB SRAM.
     let t = groq.decode_latency(1, 256, &model, None, &c);
@@ -235,7 +235,7 @@ fn sram_no_benefit_when_kv_doesnt_fit() {
     let model = LlmConfig::preset("llama-70b-fp8").unwrap();
     let mut c = ClusterConfig::single_gpu();
     c.tp = 4;
-    c.nvlink_bw = tpu.nvlink_bandwidth;
+    c.scale_up_bw = tpu.scale_up_bandwidth;
 
     // batch=64, seq=4096: KV per chip = 160 KB × 64 × 4096 / 4 ≈ 10 GB, way over SRAM.
     let with_sram = tpu.decode_latency(64, 4096, &model, None, &c);
@@ -252,7 +252,7 @@ fn tpu_ironwood_has_fp8_and_torus_ici() {
     let tpu = GpuSpec::preset("tpu-v7-ironwood").unwrap();
     assert!(tpu.flops_fp8 > 0.0, "Ironwood has FP8 tensor cores");
     // ICI is in the scale-up fabric field (~1.2 TB/s).
-    assert!(tpu.nvlink_bandwidth > 1_000e9);
+    assert!(tpu.scale_up_bandwidth > 1_000e9);
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn a100_has_no_fp8_tensor_cores() {
 fn all_reduce_scales_with_message_size() {
     let mut c = ClusterConfig::single_gpu();
     c.tp = 8;
-    c.nvlink_bw = 900e9;
+    c.scale_up_bw = 900e9;
 
     let small = c.all_reduce_latency(1_000_000);
     let big = c.all_reduce_latency(10_000_000);
