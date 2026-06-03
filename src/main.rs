@@ -18,7 +18,7 @@ use tokenmill::workload::trace_replay::TraceReplay;
 #[derive(Parser, Debug, Clone)]
 #[command(name = "tokenmill", about = "LLM inference discrete-event simulator")]
 struct Args {
-    /// Accelerator preset: rubin | b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x | tpu-v8i | tpu-v8t | tpu-v7-ironwood | groq-lpu-v1
+    /// Accelerator preset: rubin | b200 | h100 | a100 | a10g | mi355x | mi325x | mi300x | tpu-v8i | tpu-v8t | tpu-v7-ironwood | groq-lpu-v1 | cerebras-cs3
     #[arg(long, default_value = "h100")]
     gpu: String,
 
@@ -62,7 +62,7 @@ struct Args {
     #[arg(long, default_value_t = 16)]
     kv_block_size: u32,
 
-    /// KV cache total blocks (0 = auto from GPU HBM)
+    /// KV cache total blocks (0 = auto from accelerator memory)
     #[arg(long, default_value_t = 0)]
     kv_blocks: u32,
 
@@ -174,8 +174,8 @@ fn fmt_bytes(bytes: u64) -> String {
     }
 }
 
-fn fmt_params(bytes: u64, dtype_bytes: u32) -> String {
-    let params = bytes as f64 / dtype_bytes as f64;
+fn fmt_params(bytes: u64, bytes_per_param: f64) -> String {
+    let params = bytes as f64 / bytes_per_param;
     if params >= 1e12 {
         format!("{:.1} T", params / 1e12)
     } else if params >= 1e9 {
@@ -185,12 +185,13 @@ fn fmt_params(bytes: u64, dtype_bytes: u32) -> String {
     }
 }
 
-fn dtype_label(bytes: u32) -> &'static str {
-    match bytes {
-        1 => "fp8",
-        2 => "bf16/fp16",
-        4 => "fp32",
-        _ => "?",
+fn dtype_label(bits: u32) -> &'static str {
+    match bits {
+        4 => "fp4/int4",
+        8 => "fp8/int8",
+        16 => "bf16/fp16",
+        32 => "fp32",
+        _ => "custom",
     }
 }
 
@@ -216,9 +217,10 @@ fn print_model_card(args: &Args) {
     println!("Model {}", sep);
 
     // Parameters
-    let total_params = fmt_params(model.weight_bytes, model.dtype_bytes);
+    let bytes_per_param = model.weight_bytes_per_param();
+    let total_params = fmt_params(model.weight_bytes, bytes_per_param);
     if model.is_moe() {
-        let active_params = fmt_params(model.weight_bytes_active(), model.dtype_bytes);
+        let active_params = fmt_params(model.weight_bytes_active(), bytes_per_param);
         let active_pct = model.active_param_fraction() * 100.0;
         println!("  Type           MoE (sparse activation)");
         println!(
@@ -238,9 +240,15 @@ fn print_model_card(args: &Args) {
     }
 
     println!(
-        "  Dtype          {}  ({} byte/param)",
-        dtype_label(model.dtype_bytes),
-        model.dtype_bytes
+        "  Dtype          {} weights  ({:.1} byte/param, {} activation byte{})",
+        dtype_label(model.weight_bits),
+        bytes_per_param,
+        model.activation_bytes(),
+        if model.activation_bytes() == 1 {
+            ""
+        } else {
+            "s"
+        }
     );
     println!(
         "  Architecture   {} layers  |  d_model={}  |  {} kv-heads × {} head-dim",
@@ -276,7 +284,7 @@ fn print_model_card(args: &Args) {
             * model.n_layers as f64
             * model.n_kv_heads as f64
             * model.head_dim as f64
-            * model.dtype_bytes as f64
+            * model.kv_bytes_per_entry()
             / 1024.0;
         let compression = std_kv_kb / kv_per_token_kb;
         println!("  KV cache (MLA) {} L × rank-{}  =  {:.1} KB/token  ({:.0}× smaller than MHA {:.0} KB)",
@@ -292,18 +300,18 @@ fn print_model_card(args: &Args) {
     let cluster_desc = build_cluster_desc(args, &gpu);
     println!("Cluster {}", sep);
     println!("  {}", cluster_desc);
-    let peak_flops = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 {
+    let peak_flops = if model.weight_bits == 8 && gpu.flops_fp8 > 0.0 {
         gpu.flops_fp8
     } else {
         gpu.flops_bf16
     };
-    let dtype_tag = if model.dtype_bytes == 1 && gpu.flops_fp8 > 0.0 {
+    let dtype_tag = if model.weight_bits == 8 && gpu.flops_fp8 > 0.0 {
         "FP8"
     } else {
         "BF16"
     };
     println!(
-        "  HBM per GPU    {}  ({:.0} TFLOPS {} peak)",
+        "  Memory/accel   {}  ({:.0} TFLOPS {} peak)",
         fmt_bytes(gpu.memory_capacity),
         peak_flops / 1e12,
         dtype_tag
@@ -311,7 +319,7 @@ fn print_model_card(args: &Args) {
 
     let weight_fit = if fits {
         format!(
-            "✓ fits  ({}/GPU < {} HBM)",
+            "✓ fits  ({}/accelerator < {} memory)",
             fmt_bytes(weight_per_gpu),
             fmt_bytes(gpu.memory_capacity)
         )

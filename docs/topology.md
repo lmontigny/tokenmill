@@ -21,6 +21,7 @@ interconnect that exists inside a single server, rack, or pod:
 | **Google TPU** v7 Ironwood / 8t | ICI | 3D torus | 1 superpod (256 – 9 600 chips) |
 | **Google TPU** 8i | ICI + OCS | Boardfly (Dragonfly) | 1 pod (1 024 chips) |
 | **Groq** LPU v1 | C2C copper / fibre | High-radix mesh | 1 GroqRack / GroqPod (≤256 chips) |
+| **Cerebras** CS-3 / WSE-3 | SwarmX / system I/O | Wafer-scale systems | 1 CS-3 or CS-3 cluster |
 
 All collective formulas in [`src/hardware/cluster.rs`](../src/hardware/cluster.rs)
 (`all_reduce_latency`, `ep_all_to_all_latency`, `pp_transfer_latency`) use these
@@ -69,6 +70,11 @@ Three cases where this matters in practice:
    cross-rack traffic should drop to `internode_bw` rates. To approximate, set
    `--internode-bw-gbps` to the actual cross-rack link rate and use `--disaggregate`
    to model the boundary; for general multi-rack TP, you'd need to extend the model.
+
+4. **Cerebras multi-system TP** — one CS-3 has a 214 Pb/s internal wafer fabric,
+   but TP across CS-3 systems crosses the external system boundary. The preset
+   uses 1.2 Tb/s system I/O as a conservative cross-system bandwidth rather than
+   pretending the wafer fabric extends across machines.
 
 ## Why this scope
 

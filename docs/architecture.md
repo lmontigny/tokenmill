@@ -23,7 +23,7 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 
 ## Hardware
 
-- `GpuSpec` — peak FLOPS (BF16/FP8), HBM bandwidth + capacity, NVLink bandwidth, MFU calibration. Presets: `b200`, `h100`, `a100`, `a10g`.
+- `GpuSpec` — peak FLOPS (BF16/FP8), memory bandwidth + capacity, scale-up fabric bandwidth, MFU calibration. Presets cover NVIDIA, AMD, Google TPU, Groq, and Cerebras accelerators.
 - `ClusterConfig` — TP/PP/EP degrees, NVLink + internode bandwidth, disaggregation flag. All collective formulas (ring-allreduce, EP all-to-all, PP transfer, KV transfer) live here.
 - `KernelTable` — optional CSV of profiled kernel latencies, looked up by (gpu, model, op, batch, seq_len) with linear interpolation on `seq_len`. Roofline fallback on miss.
 

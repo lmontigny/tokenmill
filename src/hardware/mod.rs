@@ -1,3 +1,4 @@
+pub mod cerebras;
 pub mod cluster;
 pub mod cost;
 pub mod gpu;

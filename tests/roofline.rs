@@ -254,6 +254,22 @@ fn groq_needs_high_tp_for_large_models() {
 }
 
 #[test]
+fn cerebras_cs3_is_sram_only_with_system_io_boundary() {
+    let cs3 = GpuSpec::preset("cerebras-cs3").unwrap();
+
+    assert_eq!(cs3.memory_capacity, 44_000_000_000);
+    assert!(
+        (cs3.memory_bandwidth - 21_000e12).abs() < 1e9,
+        "expected 21 PB/s WSE-3 SRAM bandwidth"
+    );
+    assert_eq!(cs3.on_chip_sram, 0);
+    assert!(
+        (cs3.scale_up_bandwidth - 150e9).abs() < 1e6,
+        "expected 1.2 Tb/s system I/O as cross-system scale-up"
+    );
+}
+
+#[test]
 fn sram_no_benefit_when_kv_doesnt_fit() {
     // For large batch × long-context MHA (e.g. llama-70b at batch=32, seq=4096), KV per chip
     // is hundreds of MB — exceeds even TPU 8i's 384 MB SRAM. Latency should match no-SRAM case.
