@@ -37,6 +37,7 @@ These are 2026 on-demand list prices, drawn from AWS / GCP / Lambda / Vultr / Ho
 | `tpu-v8t` | 5.50 | estimated, marketed for training |
 | `tpu-v7-ironwood` | 4.00 | extrapolated from GCP TPU v5p |
 | `groq-lpu-v1` | 0.30 | back-calculated from Groq's per-token pricing |
+| `cerebras-cs3` | 0.00 | disabled; no stable public per-system on-demand list price |
 
 ## Output
 

@@ -10,7 +10,18 @@ pub struct LlmConfig {
     pub head_dim: u32,
     pub ffn_hidden: u32,
     pub vocab_size: u32,
-    pub dtype_bytes: u32,
+    /// Bits per weight (4 = NVFP4 / W4 quant, 8 = FP8 / INT8, 16 = BF16/FP16, 32 = FP32).
+    /// Drives weight memory + decode HBM traffic + selects the matching FLOPS tier on GpuSpec.
+    pub weight_bits: u32,
+    /// Bits per KV cache entry. Defaults to weight_bits if 0 (most production configs
+    /// quantise weights and KV together, but mixed schemes like W4A8KV4 set this separately).
+    #[serde(default)]
+    pub kv_bits: u32,
+    /// Structured-sparsity speedup factor on supporting hardware (1.0 = dense, 2.0 = 2:4 sparse).
+    /// Only applies when GpuSpec.supports_2to4_sparsity is true and the model has been pruned.
+    /// Defaults to 1.0 (dense).
+    #[serde(default = "default_sparsity")]
+    pub weight_sparsity: f64,
     pub weight_bytes: u64,
 
     // MoE topology (all 0 = dense model)
@@ -36,6 +47,40 @@ pub struct LlmConfig {
     pub active_weight_bytes: u64,
 }
 
+fn default_sparsity() -> f64 {
+    1.0
+}
+
+impl LlmConfig {
+    /// Effective KV bits per entry (falls back to weight_bits when kv_bits is unset).
+    pub fn effective_kv_bits(&self) -> u32 {
+        if self.kv_bits > 0 {
+            self.kv_bits
+        } else {
+            self.weight_bits
+        }
+    }
+
+    /// Bytes per parameter, derived from weight_bits. FP4 → 0.5, FP8 → 1.0, BF16 → 2.0.
+    pub fn weight_bytes_per_param(&self) -> f64 {
+        self.weight_bits as f64 / 8.0
+    }
+
+    /// Bytes per KV entry, derived from effective_kv_bits.
+    pub fn kv_bytes_per_entry(&self) -> f64 {
+        self.effective_kv_bits() as f64 / 8.0
+    }
+
+    /// Byte width used for activations and collective messages.
+    ///
+    /// The current model tracks weight and KV precision separately; activations
+    /// still need an integer byte width for communication formulas. FP4 weights
+    /// therefore use 1 byte here until activation precision is modelled directly.
+    pub fn activation_bytes(&self) -> u32 {
+        ((self.weight_bits as f64 / 8.0).ceil() as u32).max(1)
+    }
+}
+
 impl LlmConfig {
     pub fn is_moe(&self) -> bool {
         self.n_experts > 1
@@ -43,7 +88,7 @@ impl LlmConfig {
 
     /// Active expert-weight bytes per forward pass — the portion sharded by EP, not TP.
     /// For dense models returns 0 (all weights shard by TP).
-    /// Formula: n_moe_layers × (n_active_experts + n_shared_experts) × 2 × d_model × expert_hidden × dtype_bytes.
+    /// Formula: n_moe_layers × (n_active_experts + n_shared_experts) × 2 × d_model × expert_hidden × weight_bytes_per_param.
     /// The factor of 2 covers gate+down projections (consistent with the 2N FLOPs roofline rule).
     pub fn expert_weight_bytes_active(&self) -> u64 {
         if !self.is_moe() || self.n_moe_layers == 0 {
@@ -54,10 +99,11 @@ impl LlmConfig {
         } else {
             self.ffn_hidden
         };
-        let per_expert = 2 * self.d_model as u64 * hidden as u64 * self.dtype_bytes as u64;
-        self.n_moe_layers as u64
+        let per_expert_params = 2u64 * self.d_model as u64 * hidden as u64;
+        let total_params = self.n_moe_layers as u64
             * (self.n_active_experts + self.n_shared_experts) as u64
-            * per_expert
+            * per_expert_params;
+        (total_params as f64 * self.weight_bytes_per_param()) as u64
     }
 
     /// Fraction of model weights active per forward pass per token.
@@ -92,20 +138,19 @@ impl LlmConfig {
 
     /// KV cache bytes for a single request with `seq_len` tokens.
     /// Uses MLA compression when kv_lora_rank > 0 (e.g. DeepSeek V3).
+    /// Bytes per entry come from `effective_kv_bits()` — supports KV quantisation
+    /// (e.g. W4A8KV4 sets kv_bits=4 separately from weight_bits).
     pub fn kv_bytes(&self, seq_len: u32) -> u64 {
-        if self.kv_lora_rank > 0 {
+        let entries = if self.kv_lora_rank > 0 {
             // Compressed latent KV: one vector of kv_lora_rank per layer per token.
-            self.n_layers as u64
-                * self.kv_lora_rank as u64
-                * seq_len as u64
-                * self.dtype_bytes as u64
+            self.n_layers as u64 * self.kv_lora_rank as u64 * seq_len as u64
         } else {
             2 * self.n_layers as u64
                 * self.n_kv_heads as u64
                 * self.head_dim as u64
                 * seq_len as u64
-                * self.dtype_bytes as u64
-        }
+        };
+        (entries as f64 * self.kv_bytes_per_entry()) as u64
     }
 
     pub fn preset(name: &str) -> Option<Self> {
@@ -120,7 +165,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 28672,
                 vocab_size: 128256,
-                dtype_bytes: 2,
+                weight_bits: 16,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 140_000_000_000,
                 n_experts: 0,
                 n_active_experts: 0,
@@ -139,7 +186,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 14336,
                 vocab_size: 128256,
-                dtype_bytes: 2,
+                weight_bits: 16,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 16_000_000_000,
                 n_experts: 0,
                 n_active_experts: 0,
@@ -150,7 +199,7 @@ impl LlmConfig {
                 active_weight_bytes: 0,
             }),
             // ── FP8 dense variants (for validation against NIM/TRT-LLM benchmarks) ──
-            // Same architecture as BF16 counterparts; dtype_bytes=1 halves weight size.
+            // Same architecture as BF16 counterparts; weight_bits=8 halves weight size.
             "llama-70b-fp8" => Some(Self {
                 name: "llama-70b-fp8".into(),
                 n_layers: 80,
@@ -160,7 +209,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 28672,
                 vocab_size: 128256,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 70_000_000_000,
                 n_experts: 0,
                 n_active_experts: 0,
@@ -179,7 +230,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 14336,
                 vocab_size: 128256,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 8_000_000_000,
                 n_experts: 0,
                 n_active_experts: 0,
@@ -201,7 +254,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 14336,
                 vocab_size: 32000,
-                dtype_bytes: 2,
+                weight_bits: 16,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 93_000_000_000,
                 n_experts: 8,
                 n_active_experts: 2,
@@ -223,7 +278,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 8192,
                 vocab_size: 128256,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 400_000_000_000,
                 n_experts: 128,
                 n_active_experts: 1,
@@ -245,7 +302,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 18432,
                 vocab_size: 129280,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 671_000_000_000,
                 n_experts: 256,
                 n_active_experts: 8,
@@ -268,7 +327,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 18432,
                 vocab_size: 163840,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 1_026_000_000_000,
                 n_experts: 384,
                 n_active_experts: 8,
@@ -291,7 +352,9 @@ impl LlmConfig {
                 head_dim: 128,
                 ffn_hidden: 28672,
                 vocab_size: 128256,
-                dtype_bytes: 1,
+                weight_bits: 8,
+                kv_bits: 0,
+                weight_sparsity: 1.0,
                 weight_bytes: 2_000_000_000_000,
                 n_experts: 16,
                 n_active_experts: 1,

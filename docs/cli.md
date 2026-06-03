@@ -4,7 +4,7 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` |
+| `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` \| `cerebras-cs3` |
 | `--model` | `llama-70b` | Model preset: `llama-70b` \| `llama-8b` \| `llama-70b-fp8` \| `llama-8b-fp8` \| `mixtral-8x7b` \| `llama4-maverick` \| `deepseek-v3` \| `kimi-k2` \| `llama4-behemoth` |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -66,10 +66,13 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 | `tpu-v8t` | Google TPU 8t (2026, training) | 3150 ‡ | 6300 ‡ | 216 GB | 6.5 TB/s | 2.4 TB/s (ICI, 3D-torus) — 128 MB SRAM | 750 W † |
 | `tpu-v7-ironwood` | Google TPU v7 (Apr 2025) | 2304 | 4614 | 192 GB | 7.37 TB/s | 1.2 TB/s (ICI, 3D-torus) — ~256 MB SRAM | 500 W † |
 | `groq-lpu-v1` | Groq LPU v1 (GroqChip 1) | 188 | 375 | **230 MB** § | 80 TB/s § | ~400 GB/s (C2C) — SRAM-only | 215 W |
+| `cerebras-cs3` | Cerebras CS-3 / WSE-3 | 125000 | — | **44 GB** ¶ | 21 PB/s ¶ | 150 GB/s (system I/O) | 23000 W † |
 
 † Google doesn't publish per-chip TPU TDP; values are estimates from the "2× perf/W vs Ironwood" claim.
 
 § Groq has **no off-chip HBM**. The "HBM" columns carry the on-chip SRAM specs (230 MB / 80 TB/s). Any non-trivial model needs very high `--tp` to fit (e.g. llama-70b-fp8 needs TP ≈ 358 chips). Deterministic compiler-scheduled execution yields very high MFU but per-hop link latency in the chip mesh is not modelled — the simulator may under-estimate real-world TPOT at large TP.
+
+¶ Cerebras CS-3 uses WSE-3 wafer-scale SRAM as its main memory: 44 GB at 21 PB/s. Multi-system TP uses the external system boundary (1.2 Tb/s = 150 GB/s), not the 214 Pb/s internal wafer fabric. [Cerebras](https://www.cerebras.ai/blog/cerebras-cs3), [Neocortex CS-3 specs](https://portal.neocortex.psc.edu/docs/CS-3/system-specifications.html).
 
 ‡ TPU 8i / 8t BF16 and FP8 figures are **derived** from the published FP4 PFLOPs (10.1 and 12.6 respectively) using the standard 2× per-precision ratio. Google publishes only FP4. [Source.](https://cloud.google.com/blog/products/compute/tpu-8t-and-tpu-8i-technical-deep-dive)
 

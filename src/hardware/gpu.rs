@@ -68,12 +68,12 @@ impl GpuSpec {
             None => self.roofline_prefill(batch, seq_len, model, tp, cluster.ep),
         };
 
-        let ar_msg =
-            batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let activation_bytes = model.activation_bytes();
+        let ar_msg = batch as u64 * seq_len as u64 * model.d_model as u64 * activation_bytes as u64;
         let ar_cost = model.n_layers as f64 * 2.0 * cluster.all_reduce_latency(ar_msg);
 
         let act_bytes =
-            batch as u64 * seq_len as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+            batch as u64 * seq_len as u64 * model.d_model as u64 * activation_bytes as u64;
         let pp_cost = (pp - 1) as f64 * cluster.pp_transfer_latency(act_bytes, true);
 
         // EP all-to-all: 2 per MoE layer. Each token dispatches to top_K experts → multiply by top_K.
@@ -85,7 +85,7 @@ impl GpuSpec {
                 * cluster.ep_all_to_all_latency(
                     batch_tokens * top_k,
                     model.d_model,
-                    model.dtype_bytes,
+                    activation_bytes,
                 )
         } else {
             0.0
@@ -117,10 +117,11 @@ impl GpuSpec {
             None => self.roofline_decode(batch, avg_kv_len, model, tp, cluster.ep),
         };
 
-        let ar_msg = batch as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let activation_bytes = model.activation_bytes();
+        let ar_msg = batch as u64 * model.d_model as u64 * activation_bytes as u64;
         let ar_cost = model.n_layers as f64 * 2.0 * cluster.all_reduce_latency(ar_msg);
 
-        let act_bytes = batch as u64 * model.d_model as u64 * model.dtype_bytes as u64;
+        let act_bytes = batch as u64 * model.d_model as u64 * activation_bytes as u64;
         let pp_cost = (pp - 1) as f64 * cluster.pp_transfer_latency(act_bytes, true);
 
         let ep_cost = if model.is_moe() && model.n_moe_layers > 0 {
@@ -130,7 +131,7 @@ impl GpuSpec {
                 * cluster.ep_all_to_all_latency(
                     batch as u64 * top_k,
                     model.d_model,
-                    model.dtype_bytes,
+                    activation_bytes,
                 )
         } else {
             0.0
@@ -153,18 +154,18 @@ impl GpuSpec {
         let tokens = batch as f64 * seq_len as f64;
         let flops = if ep > 1 && model.is_moe() {
             let expert_params =
-                model.expert_weight_bytes_active() as f64 / model.dtype_bytes as f64;
+                model.expert_weight_bytes_active() as f64 / model.weight_bytes_per_param();
             let other_params = model
                 .weight_bytes_active()
                 .saturating_sub(model.expert_weight_bytes_active())
                 as f64
-                / model.dtype_bytes as f64;
+                / model.weight_bytes_per_param();
             2.0 * tokens * (other_params / tp as f64 + expert_params / ep as f64)
         } else {
-            let active_params = model.weight_bytes_active() as f64 / model.dtype_bytes as f64;
+            let active_params = model.weight_bytes_active() as f64 / model.weight_bytes_per_param();
             2.0 * tokens * active_params / tp as f64
         };
-        let peak_flops = if model.dtype_bytes == 1 && self.flops_fp8 > 0.0 {
+        let peak_flops = if model.weight_bits == 8 && self.flops_fp8 > 0.0 {
             self.flops_fp8
         } else {
             self.flops_bf16
@@ -340,7 +341,9 @@ impl GpuSpec {
                 mfu_decode: 0.65,
             }),
             // Fall through to vendor-specific accelerator modules.
-            other => super::tpu::preset(other).or_else(|| super::groq::preset(other)),
+            other => super::tpu::preset(other)
+                .or_else(|| super::groq::preset(other))
+                .or_else(|| super::cerebras::preset(other)),
         }
     }
 }

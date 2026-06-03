@@ -6,6 +6,11 @@ Run the roofline model against reference kernel latencies:
 ./target/release/tokenmill --validate-kernels data/reference_kernels.csv
 ```
 
+For Cerebras-specific online validation, see
+[`cerebras-validation.md`](cerebras-validation.md). The CS-3 preset currently
+matches public hardware specs but intentionally behaves as a roofline ceiling,
+not as a calibrated Cerebras Inference API predictor.
+
 Results against `data/reference_kernels.csv` (GPU kernel time only; serving frameworks add 3–10 ms overhead):
 
 | GPU | Model | Op | MAPE | Notes |
