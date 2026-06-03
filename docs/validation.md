@@ -25,7 +25,7 @@ Results against `data/reference_kernels.csv` (GPU kernel time only; serving fram
 
 ## Key findings
 
-- **Prefill** (compute-bound): ~8% MAPE on FP8. `flops_fp8` (1978 TFLOPS on H100) is used automatically when `dtype_bytes == 1`.
+- **Prefill** (compute-bound): ~8% MAPE on FP8. `flops_fp8` and `flops_fp4` are selected from `weight_bits`; FP4 paths should be calibrated with kernel tables before production use.
 - **Decode** (memory-BW bound): 5–20% MAPE. Error grows at large batch × seq_len where paged KV access is ~60–70% efficient vs sequential weight reads (80% mfu assumed for both).
 - **Serving TPOT vs kernel time**: framework overhead (Python scheduler, CUDA launch, NCCL) adds 3–10 ms per step and is **not** modeled. Subtract this from observed TPOT before comparing to simulator output.
 - **AMD MI series**: the MFU constants (`mfu_prefill=0.65`, `mfu_decode=0.72`) are set ~10% below NVIDIA equivalents as a placeholder for the ROCm/vLLM vs CUDA kernel-maturity gap. Real-world MI300X has been reported anywhere from 0.45 (early ROCm) to 0.75 (recent vLLM ROCm) for decode — calibrate with `--validate-kernels` against your own measurements before drawing conclusions on AMD numbers.

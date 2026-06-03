@@ -16,7 +16,7 @@
 /// scale-up domain (NVLink switch, Infinity Fabric, TPU ICI, …). No cross-node DCN modelled.
 ///   - Each GPU holds n_experts/ep experts; tokens are dispatched via the scale-up fabric.
 ///   - Two all-to-alls per MoE layer: dispatch (send top_K token activations out) + combine (gather).
-///   - All-to-all data per GPU per direction ≈ (ep-1)/ep × (top_K × batch / ep) × d_model × dtype_bytes.
+///   - All-to-all data per GPU per direction ≈ (ep-1)/ep × (top_K × batch / ep) × d_model × activation_bytes.
 ///   - Fully-connected fabrics (NVSwitch, OCS) give full bisection BW; ring/torus fabrics
 ///     get the same form with per-hop latency dominating at small messages.
 #[derive(Debug, Clone)]
@@ -92,14 +92,19 @@ impl ClusterConfig {
     /// Called twice per MoE layer: once to send tokens to expert GPUs, once to gather results.
     ///
     /// `batch_tokens` must already be multiplied by top_K at the call site (caller knows the model).
-    /// Per-GPU send volume = (ep-1)/ep × (batch_tokens/ep) × d_model × dtype_bytes.
+    /// Per-GPU send volume = (ep-1)/ep × (batch_tokens/ep) × d_model × activation_bytes.
     /// One α per all-to-all (dominant at very small messages or very high EP).
-    pub fn ep_all_to_all_latency(&self, batch_tokens: u64, d_model: u32, dtype_bytes: u32) -> f64 {
+    pub fn ep_all_to_all_latency(
+        &self,
+        batch_tokens: u64,
+        d_model: u32,
+        activation_bytes: u32,
+    ) -> f64 {
         if self.ep <= 1 || self.scale_up_bw <= 0.0 {
             return 0.0;
         }
         let tokens_per_gpu = (batch_tokens / self.ep as u64).max(1);
-        let msg_bytes = tokens_per_gpu * d_model as u64 * dtype_bytes as u64;
+        let msg_bytes = tokens_per_gpu * d_model as u64 * activation_bytes as u64;
         let bw_term = (self.ep - 1) as f64 / self.ep as f64 * msg_bytes as f64 / self.scale_up_bw;
         self.scale_up_latency + bw_term
     }

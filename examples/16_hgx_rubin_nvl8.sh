@@ -6,9 +6,8 @@
 # ISL=OSL=4K. Compare to examples/12_frontier_kimi_k2.sh (same Kimi K2 on HGX B200).
 #
 # Note: NVIDIA's published "10× more token-factory throughput" claim uses sparse
-# NVFP4 on Rubin vs dense NVFP4 on B200. We model FP8 dense for both, so the gap
-# you see here (~1.6× faster TPOT) reflects the raw HBM-BW and FLOPS scaling
-# *without* the additional sparsity / FP4 boost.
+# NVFP4 on Rubin vs dense NVFP4 on B200. This example still uses the FP8 Kimi K2
+# preset; switch to kimi-k2-nvfp4-sparse to include the FP4/sparsity boost.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo run --release -- \

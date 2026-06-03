@@ -37,7 +37,7 @@ Simulated results for various model/GPU/scheduler configurations (60 s runs, log
 
 ★ Groq numbers are **upper-bound optimistic** for TPOT (real-world serving is reported at ~2–4 ms on llama-70b), but `scale_up_latency` now captures the per-hop chip-mesh α component. Calibrate via `data/kernel_table.csv` for production accuracy.
 
-‡ NVIDIA's own slides claim **10× more token-factory throughput** for HGX Rubin NVL8 vs HGX B200 on this exact workload. The headline 10× uses **Rubin with sparse NVFP4 vs B200 with dense NVFP4** — we model FP8 dense for both (no FP4 support yet), so our row 30 shows the FP8-dense-iso comparison: ~1.6–1.8× from raw memory-BW and FLOPS scaling. FP4 sparsity would contribute another ~4× on top, getting close to the published number. Adding FP4 support is tracked under [mixed-precision quantization](roadmap.md).
+‡ NVIDIA's own slides claim **10× more token-factory throughput** for HGX Rubin NVL8 vs HGX B200 on this exact workload. The headline 10× uses **Rubin with sparse NVFP4 vs B200 with dense NVFP4**. Row 30 remains the older FP8-dense comparison; use `kimi-k2-nvfp4-sparse` to model the sparse NVFP4 path.
 
 ## Cheapest serving rates in this table
 

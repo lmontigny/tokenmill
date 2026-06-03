@@ -32,13 +32,15 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
         // for larger TP spanning the OCS layer it under-estimates by ~10-20%.
         "tpu-v8i" => Some(GpuSpec {
             name: "TPU-8i".into(),
-            flops_bf16: 2525e12,        // FP4 / 4 = 2.525 PFLOPS BF16 (derived)
-            flops_fp8: 5050e12,         // FP4 / 2 = 5.05 PFLOPS FP8 (derived)
-            memory_bandwidth: 8.601e12, // 8601 GB/s — official
+            flops_bf16: 2525e12,  // FP4 / 4 = 2.525 PFLOPS BF16 (derived)
+            flops_fp8: 5050e12,   // FP4 / 2 = 5.05 PFLOPS FP8 (derived)
+            flops_fp4: 10_100e12, // published FP4
+            supports_2to4_sparsity: false,
+            memory_bandwidth: 8.601e12,       // 8601 GB/s — official
             memory_capacity: 288_000_000_000, // 288 GB — official
-            on_chip_sram: 384_000_000,  // 384 MB Vmem — official, 3× TPU 8t
-            scale_up_bandwidth: 2400e9, // ICI ~2.4 TB/s aggregate (2× v7 Ironwood per blog)
-            scale_up_latency: 200e-9,   // Boardfly 7-hop diameter ⇒ very low per-hop α
+            on_chip_sram: 384_000_000,        // 384 MB Vmem — official, 3× TPU 8t
+            scale_up_bandwidth: 2400e9,       // ICI ~2.4 TB/s aggregate (2× v7 Ironwood per blog)
+            scale_up_latency: 200e-9,         // Boardfly 7-hop diameter ⇒ very low per-hop α
             tdp_watts: 600.0, // TPU 8i estimate (Google "2× perf/W" claim implies modest TDP)
             cost_per_hour_usd: 4.50, // estimated 2026 GCP on-demand
             mfu_prefill: 0.72,
@@ -48,15 +50,17 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
         // 3D torus, 9600-chip superpod. Same FP4 derivation as 8i.
         "tpu-v8t" => Some(GpuSpec {
             name: "TPU-8t".into(),
-            flops_bf16: 3150e12,        // FP4 / 4 = 3.15 PFLOPS BF16 (derived)
-            flops_fp8: 6300e12,         // FP4 / 2 = 6.3 PFLOPS FP8 (derived)
-            memory_bandwidth: 6.528e12, // 6528 GB/s — official
+            flops_bf16: 3150e12,  // FP4 / 4 = 3.15 PFLOPS BF16 (derived)
+            flops_fp8: 6300e12,   // FP4 / 2 = 6.3 PFLOPS FP8 (derived)
+            flops_fp4: 12_600e12, // published FP4
+            supports_2to4_sparsity: false,
+            memory_bandwidth: 6.528e12,       // 6528 GB/s — official
             memory_capacity: 216_000_000_000, // 216 GB — official
-            on_chip_sram: 128_000_000,  // 128 MB Vmem — official
-            scale_up_bandwidth: 2400e9, // ICI 2× v7 Ironwood (blog: "2x scale-up bandwidth")
-            scale_up_latency: 500e-9,   // 3D-torus hop ~500 ns
-            tdp_watts: 750.0,           // TPU 8t estimate (training chip, more compute)
-            cost_per_hour_usd: 5.50,    // estimate; TPU 8t marketed for training workloads
+            on_chip_sram: 128_000_000,        // 128 MB Vmem — official
+            scale_up_bandwidth: 2400e9,       // ICI 2× v7 Ironwood (blog: "2x scale-up bandwidth")
+            scale_up_latency: 500e-9,         // 3D-torus hop ~500 ns
+            tdp_watts: 750.0,                 // TPU 8t estimate (training chip, more compute)
+            cost_per_hour_usd: 5.50,          // estimate; TPU 8t marketed for training workloads
             mfu_prefill: 0.70,
             mfu_decode: 0.75,
         }),
@@ -66,6 +70,8 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             name: "TPU-v7-Ironwood".into(),
             flops_bf16: 2304e12,
             flops_fp8: 4614e12,
+            flops_fp4: 0.0,
+            supports_2to4_sparsity: false,
             memory_bandwidth: 7.37e12,
             memory_capacity: 192_000_000_000,
             on_chip_sram: 256_000_000, // ~256 MB Vmem (estimate; between v5p and 8t)

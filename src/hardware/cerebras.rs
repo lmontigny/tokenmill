@@ -31,11 +31,13 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             name: "Cerebras-CS3-WSE3".into(),
             flops_bf16: 125_000e12,
             flops_fp8: 0.0, // WSE-3 peak is published as FP16/BF16-class AI compute.
+            flops_fp4: 0.0,
+            supports_2to4_sparsity: false,
             memory_bandwidth: 21_000e12, // 21 PB/s on-wafer SRAM bandwidth
             memory_capacity: 44_000_000_000, // 44 GB on-wafer SRAM
-            on_chip_sram: 0, // Main memory already is SRAM.
-            scale_up_bandwidth: 150e9, // 1.2 Tb/s system I/O = 150 GB/s
-            scale_up_latency: 2e-6, // conservative system-level hop estimate
+            on_chip_sram: 0,             // Main memory already is SRAM.
+            scale_up_bandwidth: 150e9,   // 1.2 Tb/s system I/O = 150 GB/s
+            scale_up_latency: 2e-6,      // conservative system-level hop estimate
             tdp_watts: 23_000.0,
             cost_per_hour_usd: 0.0, // no stable public per-system on-demand price
             mfu_prefill: 0.75,

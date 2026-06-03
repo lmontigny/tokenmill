@@ -13,6 +13,10 @@ pub struct LlmConfig {
     /// Bits per weight (4 = NVFP4 / W4 quant, 8 = FP8 / INT8, 16 = BF16/FP16, 32 = FP32).
     /// Drives weight memory + decode HBM traffic + selects the matching FLOPS tier on GpuSpec.
     pub weight_bits: u32,
+    /// Bits per activation used for collectives and pipeline/expert transfers.
+    /// Defaults to weight_bits when 0, but production configs often use W4A16 or W4A8.
+    #[serde(default)]
+    pub activation_bits: u32,
     /// Bits per KV cache entry. Defaults to weight_bits if 0 (most production configs
     /// quantise weights and KV together, but mixed schemes like W4A8KV4 set this separately).
     #[serde(default)]
@@ -61,6 +65,15 @@ impl LlmConfig {
         }
     }
 
+    /// Effective activation bits per value (falls back to weight_bits when unset).
+    pub fn effective_activation_bits(&self) -> u32 {
+        if self.activation_bits > 0 {
+            self.activation_bits
+        } else {
+            self.weight_bits
+        }
+    }
+
     /// Bytes per parameter, derived from weight_bits. FP4 → 0.5, FP8 → 1.0, BF16 → 2.0.
     pub fn weight_bytes_per_param(&self) -> f64 {
         self.weight_bits as f64 / 8.0
@@ -77,7 +90,32 @@ impl LlmConfig {
     /// still need an integer byte width for communication formulas. FP4 weights
     /// therefore use 1 byte here until activation precision is modelled directly.
     pub fn activation_bytes(&self) -> u32 {
-        ((self.weight_bits as f64 / 8.0).ceil() as u32).max(1)
+        ((self.effective_activation_bits() as f64 / 8.0).ceil() as u32).max(1)
+    }
+
+    pub fn with_quantization(
+        &self,
+        name: &str,
+        weight_bits: u32,
+        activation_bits: u32,
+        kv_bits: u32,
+        weight_sparsity: f64,
+    ) -> Self {
+        let mut model = self.clone();
+        let old_weight_bytes_per_param = self.weight_bytes_per_param();
+        let new_weight_bytes_per_param = weight_bits as f64 / 8.0;
+        let scale = new_weight_bytes_per_param / old_weight_bytes_per_param;
+
+        model.name = name.into();
+        model.weight_bits = weight_bits;
+        model.activation_bits = activation_bits;
+        model.kv_bits = kv_bits;
+        model.weight_sparsity = weight_sparsity;
+        model.weight_bytes = (self.weight_bytes as f64 * scale) as u64;
+        if self.active_weight_bytes > 0 {
+            model.active_weight_bytes = (self.active_weight_bytes as f64 * scale) as u64;
+        }
+        model
     }
 }
 
@@ -166,6 +204,7 @@ impl LlmConfig {
                 ffn_hidden: 28672,
                 vocab_size: 128256,
                 weight_bits: 16,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 140_000_000_000,
@@ -187,6 +226,7 @@ impl LlmConfig {
                 ffn_hidden: 14336,
                 vocab_size: 128256,
                 weight_bits: 16,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 16_000_000_000,
@@ -210,6 +250,7 @@ impl LlmConfig {
                 ffn_hidden: 28672,
                 vocab_size: 128256,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 70_000_000_000,
@@ -231,6 +272,7 @@ impl LlmConfig {
                 ffn_hidden: 14336,
                 vocab_size: 128256,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 8_000_000_000,
@@ -255,6 +297,7 @@ impl LlmConfig {
                 ffn_hidden: 14336,
                 vocab_size: 32000,
                 weight_bits: 16,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 93_000_000_000,
@@ -279,6 +322,7 @@ impl LlmConfig {
                 ffn_hidden: 8192,
                 vocab_size: 128256,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 400_000_000_000,
@@ -303,6 +347,7 @@ impl LlmConfig {
                 ffn_hidden: 18432,
                 vocab_size: 129280,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 671_000_000_000,
@@ -328,6 +373,7 @@ impl LlmConfig {
                 ffn_hidden: 18432,
                 vocab_size: 163840,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 1_026_000_000_000,
@@ -353,6 +399,7 @@ impl LlmConfig {
                 ffn_hidden: 28672,
                 vocab_size: 128256,
                 weight_bits: 8,
+                activation_bits: 0,
                 kv_bits: 0,
                 weight_sparsity: 1.0,
                 weight_bytes: 2_000_000_000_000,
@@ -365,6 +412,23 @@ impl LlmConfig {
                 kv_lora_rank: 0,
                 active_weight_bytes: 288_000_000_000,
             }),
+            // ── mixed-precision / quantized serving variants ────────────────
+            // W4A16: 4-bit weights, BF16/FP16 activations, KV follows weights.
+            "llama-8b-w4a16" => Self::preset("llama-8b")
+                .map(|m| m.with_quantization("llama-8b-w4a16", 4, 16, 0, 1.0)),
+            "llama-70b-w4a16" => Self::preset("llama-70b")
+                .map(|m| m.with_quantization("llama-70b-w4a16", 4, 16, 0, 1.0)),
+            // W4A8KV4: 4-bit weights, 8-bit activations, 4-bit KV cache.
+            "llama-8b-w4a8kv4" => Self::preset("llama-8b")
+                .map(|m| m.with_quantization("llama-8b-w4a8kv4", 4, 8, 4, 1.0)),
+            "llama-70b-w4a8kv4" => Self::preset("llama-70b")
+                .map(|m| m.with_quantization("llama-70b-w4a8kv4", 4, 8, 4, 1.0)),
+            // NVFP4 sparse: dense FP4 storage plus 2:4 structured-sparsity speedup
+            // on hardware that advertises `supports_2to4_sparsity`.
+            "llama-70b-nvfp4-sparse" => Self::preset("llama-70b")
+                .map(|m| m.with_quantization("llama-70b-nvfp4-sparse", 4, 8, 4, 2.0)),
+            "kimi-k2-nvfp4-sparse" => Self::preset("kimi-k2")
+                .map(|m| m.with_quantization("kimi-k2-nvfp4-sparse", 4, 8, 4, 2.0)),
             _ => None,
         }
     }

@@ -5,9 +5,15 @@
 Without `--kernel-table`: **roofline** (compute-bound prefill, memory-BW-bound decode).
 With `--kernel-table`: table lookup with linear interpolation on seq_len, roofline fallback on miss.
 
-**FP8 dispatch**: when `model.dtype_bytes == 1`, prefill uses `flops_fp8` (H100: 1978 TFLOPS, 2× BF16)
-instead of `flops_bf16`. Decode is memory-BW bound regardless of dtype — the speedup there comes from
-loading half as many bytes (FP8 weight bytes = BF16/2).
+**Mixed-precision dispatch**: prefill uses `flops_fp4` for 4-bit weight models when available,
+then `flops_fp8` for <=8-bit models, otherwise `flops_bf16`. Decode is memory-BW bound:
+weight traffic follows `weight_bits`, KV traffic follows `kv_bits` (or `weight_bits` when unset),
+and activation collectives follow `activation_bits`.
+
+**2:4 sparsity**: when `model.weight_sparsity > 1` and the accelerator has
+`supports_2to4_sparsity`, prefill active FLOPs and decode active-weight traffic are divided by
+that sparsity factor. This models sparse NVFP4 style configs as FP4 bytes plus a 2× sparse
+execution/traffic win on supporting hardware.
 
 **On-chip SRAM (`on_chip_sram`)**: in the decode roofline, if the per-chip KV working set (KV bytes ÷ TP)
 fits in SRAM, those bytes are counted at **1/10** the HBM cost. The benefit is biggest for low-latency
@@ -36,14 +42,14 @@ weight_bytes_active = active weight bytes for one forward pass (presets use publ
 
 **DeepSeek V3 KV cache** (MLA compression):
 ```
-kv_bytes = n_layers × kv_lora_rank × seq_len × dtype_bytes   (vs 2 × n_layers × n_kv_heads × head_dim × seq_len)
+kv_bytes = n_layers × kv_lora_rank × seq_len × kv_bytes_per_entry   (vs 2 × n_layers × n_kv_heads × head_dim × seq_len)
 ```
 
 **EP decode bandwidth** (per GPU, EP > 1):
 ```
 bytes_per_gpu = (weight_attn + weight_dense_ffn + kv_bytes) / tp   ← TP-sharded
               + weight_expert_active / ep                            ← EP-sharded
-weight_expert_active = n_moe_layers × (n_active_experts + n_shared_experts) × 2 × d_model × expert_hidden × dtype
+weight_expert_active = n_moe_layers × (n_active_experts + n_shared_experts) × 2 × d_model × expert_hidden × weight_bytes_per_param
 ```
 When TP = EP (e.g. TP=8, EP=8) per-GPU BW is the same as EP=1. The difference appears when TP ≠ EP.
 
@@ -51,6 +57,6 @@ When TP = EP (e.g. TP=8, EP=8) per-GPU BW is the same as EP=1. The difference ap
 ```
 expert_activations = batch_tokens × top_K            ← each token fans out to top_K experts
 tokens_per_gpu     = expert_activations / ep
-data_per_gpu       = (ep-1)/ep × tokens_per_gpu × d_model × dtype_bytes
+data_per_gpu       = (ep-1)/ep × tokens_per_gpu × d_model × activation_bytes
 latency            = data_per_gpu / scale_up_bw         ← full bisection BW on NVSwitch
 ```

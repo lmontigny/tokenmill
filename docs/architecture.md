@@ -29,7 +29,7 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 
 ## Model
 
-- `LlmConfig` — dense or MoE topology (layers, d_model, n_kv_heads, head_dim, FFN/expert hidden, MLA `kv_lora_rank`). Knows its own `weight_bytes`, `weight_bytes_active`, `expert_weight_bytes_active`, `kv_bytes(seq_len)`.
+- `LlmConfig` — dense or MoE topology (layers, d_model, n_kv_heads, head_dim, FFN/expert hidden, MLA `kv_lora_rank`) plus mixed precision (`weight_bits`, `activation_bits`, `kv_bits`, `weight_sparsity`). Knows its own `weight_bytes`, `weight_bytes_active`, `expert_weight_bytes_active`, `kv_bytes(seq_len)`.
 - `KvCacheManager` — PagedAttention block allocator. Grows requests in fixed-size blocks; preempts and recomputes when the pool is exhausted.
 
 ## Schedulers

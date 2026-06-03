@@ -240,8 +240,10 @@ fn print_model_card(args: &Args) {
     }
 
     println!(
-        "  Dtype          {} weights  ({:.1} byte/param, {} activation byte{})",
+        "  Dtype          {} weights / A{} / KV{}  ({:.1} byte/param, {} activation byte{})",
         dtype_label(model.weight_bits),
+        model.effective_activation_bits(),
+        model.effective_kv_bits(),
         bytes_per_param,
         model.activation_bytes(),
         if model.activation_bytes() == 1 {
@@ -300,16 +302,8 @@ fn print_model_card(args: &Args) {
     let cluster_desc = build_cluster_desc(args, &gpu);
     println!("Cluster {}", sep);
     println!("  {}", cluster_desc);
-    let peak_flops = if model.weight_bits == 8 && gpu.flops_fp8 > 0.0 {
-        gpu.flops_fp8
-    } else {
-        gpu.flops_bf16
-    };
-    let dtype_tag = if model.weight_bits == 8 && gpu.flops_fp8 > 0.0 {
-        "FP8"
-    } else {
-        "BF16"
-    };
+    let peak_flops = gpu.peak_flops_for(&model);
+    let dtype_tag = gpu.precision_label_for(&model);
     println!(
         "  Memory/accel   {}  ({:.0} TFLOPS {} peak)",
         fmt_bytes(gpu.memory_capacity),

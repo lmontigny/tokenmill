@@ -11,6 +11,10 @@ pub struct GpuSpec {
     pub flops_bf16: f64, // peak BF16 FLOPS (e.g. 989e12 for H100)
     #[serde(default)]
     pub flops_fp8: f64, // peak FP8 FLOPS (e.g. 1978e12 for H100; 0 = same as bf16)
+    #[serde(default)]
+    pub flops_fp4: f64, // peak FP4/NVFP4 FLOPS; 0 = fall back to FP8/BF16
+    #[serde(default)]
+    pub supports_2to4_sparsity: bool,
     /// Main memory bandwidth in bytes/sec. HBM on NVIDIA/AMD/TPU; on-chip SRAM
     /// bandwidth on SRAM-only architectures like Groq.
     pub memory_bandwidth: f64,
@@ -44,6 +48,42 @@ pub struct GpuSpec {
 }
 
 impl GpuSpec {
+    pub fn effective_sparsity(&self, model: &LlmConfig) -> f64 {
+        if self.supports_2to4_sparsity {
+            model.weight_sparsity.max(1.0)
+        } else {
+            1.0
+        }
+    }
+
+    pub fn peak_flops_for(&self, model: &LlmConfig) -> f64 {
+        if model.weight_bits <= 4 && self.flops_fp4 > 0.0 {
+            self.flops_fp4
+        } else if model.weight_bits <= 8 && self.flops_fp8 > 0.0 {
+            self.flops_fp8
+        } else {
+            self.flops_bf16
+        }
+    }
+
+    pub fn precision_label_for(&self, model: &LlmConfig) -> &'static str {
+        if model.weight_bits <= 4 && self.flops_fp4 > 0.0 {
+            "FP4"
+        } else if model.weight_bits <= 8 && self.flops_fp8 > 0.0 {
+            "FP8"
+        } else {
+            "BF16"
+        }
+    }
+
+    fn effective_weight_bytes_active(&self, model: &LlmConfig) -> u64 {
+        (model.weight_bytes_active() as f64 / self.effective_sparsity(model)) as u64
+    }
+
+    fn effective_expert_weight_bytes_active(&self, model: &LlmConfig) -> u64 {
+        (model.expert_weight_bytes_active() as f64 / self.effective_sparsity(model)) as u64
+    }
+
     /// Prefill latency in seconds, accounting for TP, PP, and EP (MoE expert parallelism).
     ///
     /// For MoE with EP: expert FLOPs split by EP, attention/dense FLOPs split by TP.
@@ -152,24 +192,24 @@ impl GpuSpec {
         ep: u32,
     ) -> f64 {
         let tokens = batch as f64 * seq_len as f64;
+        let sparsity = self.effective_sparsity(model);
         let flops = if ep > 1 && model.is_moe() {
-            let expert_params =
-                model.expert_weight_bytes_active() as f64 / model.weight_bytes_per_param();
+            let expert_params = model.expert_weight_bytes_active() as f64
+                / model.weight_bytes_per_param()
+                / sparsity;
             let other_params = model
                 .weight_bytes_active()
                 .saturating_sub(model.expert_weight_bytes_active())
                 as f64
-                / model.weight_bytes_per_param();
+                / model.weight_bytes_per_param()
+                / sparsity;
             2.0 * tokens * (other_params / tp as f64 + expert_params / ep as f64)
         } else {
-            let active_params = model.weight_bytes_active() as f64 / model.weight_bytes_per_param();
+            let active_params =
+                model.weight_bytes_active() as f64 / model.weight_bytes_per_param() / sparsity;
             2.0 * tokens * active_params / tp as f64
         };
-        let peak_flops = if model.weight_bits == 8 && self.flops_fp8 > 0.0 {
-            self.flops_fp8
-        } else {
-            self.flops_bf16
-        };
+        let peak_flops = self.peak_flops_for(model);
         flops / (peak_flops * self.mfu_prefill)
     }
 
@@ -193,11 +233,13 @@ impl GpuSpec {
         let kv_bytes_per_chip = kv_bytes / tp as u64;
 
         let weight_bytes_per_chip = if ep > 1 && model.is_moe() {
-            let expert_bytes = model.expert_weight_bytes_active();
-            let other_bytes = model.weight_bytes_active().saturating_sub(expert_bytes);
+            let expert_bytes = self.effective_expert_weight_bytes_active(model);
+            let other_bytes = self
+                .effective_weight_bytes_active(model)
+                .saturating_sub(expert_bytes);
             other_bytes / tp as u64 + expert_bytes / ep as u64
         } else {
-            model.weight_bytes_active() / tp as u64
+            self.effective_weight_bytes_active(model) / tp as u64
         };
 
         // SRAM benefit: if the per-chip KV fits in on-chip SRAM, it costs ~1/10 of HBM.
@@ -223,8 +265,10 @@ impl GpuSpec {
             // TDP / price are not yet public — 2026 estimates.
             "rubin" => Some(Self {
                 name: "Rubin-SXM".into(),
-                flops_bf16: 8750e12,       // 8.75 PFLOPS BF16 dense (FP8 / 2)
-                flops_fp8: 17500e12,       // 17.5 PFLOPS FP8 dense (NVIDIA-published)
+                flops_bf16: 8750e12,  // 8.75 PFLOPS BF16 dense (FP8 / 2)
+                flops_fp8: 17500e12,  // 17.5 PFLOPS FP8 dense (NVIDIA-published)
+                flops_fp4: 50_000e12, // 50 PFLOPS sparse NVFP4 inference
+                supports_2to4_sparsity: true,
                 memory_bandwidth: 22.0e12, // 22 TB/s HBM4 (2.75× B200)
                 memory_capacity: 288_000_000_000, // 288 GB HBM4 (1.5× B200)
                 on_chip_sram: 150_000_000, // ~150 MB L2 estimate
@@ -238,8 +282,10 @@ impl GpuSpec {
             // NVIDIA Blackwell B200 SXM (HGX B200 = 8× this chip; also used in NVL72 racks).
             "b200" => Some(Self {
                 name: "B200-SXM".into(),
-                flops_bf16: 2250e12,              // 2.25 PFLOPS dense BF16/FP16
-                flops_fp8: 4500e12,               // 4.5 PFLOPS dense FP8 (2× H100)
+                flops_bf16: 2250e12, // 2.25 PFLOPS dense BF16/FP16
+                flops_fp8: 4500e12,  // 4.5 PFLOPS dense FP8 (2× H100)
+                flops_fp4: 9000e12,  // dense FP4-equivalent; sparsity modeled separately
+                supports_2to4_sparsity: true,
                 memory_bandwidth: 8.0e12,         // 8 TB/s HBM3e (2.4× H100)
                 memory_capacity: 192_000_000_000, // 192 GB HBM3e
                 on_chip_sram: 100_000_000,        // ~100 MB L2 (estimate)
@@ -254,6 +300,8 @@ impl GpuSpec {
                 name: "H100-SXM5".into(),
                 flops_bf16: 989e12,
                 flops_fp8: 1978e12,
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: true,
                 memory_bandwidth: 3.35e12,
                 memory_capacity: 80_000_000_000,
                 on_chip_sram: 50_000_000, // 50 MB L2
@@ -268,6 +316,8 @@ impl GpuSpec {
                 name: "A100-80GB".into(),
                 flops_bf16: 312e12,
                 flops_fp8: 0.0, // A100 does not have FP8 tensor cores
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: true,
                 memory_bandwidth: 2.0e12,
                 memory_capacity: 80_000_000_000,
                 on_chip_sram: 40_000_000, // 40 MB L2
@@ -284,8 +334,10 @@ impl GpuSpec {
             // MFU is conservative vs H100 — ROCm/vLLM kernel maturity gap.
             "mi300x" => Some(Self {
                 name: "MI300X".into(),
-                flops_bf16: 1307e12,      // 1.307 PFLOPS BF16 matrix (dense)
-                flops_fp8: 2614e12,       // 2.614 PFLOPS FP8 matrix (dense)
+                flops_bf16: 1307e12, // 1.307 PFLOPS BF16 matrix (dense)
+                flops_fp8: 2614e12,  // 2.614 PFLOPS FP8 matrix (dense)
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: false,
                 memory_bandwidth: 5.3e12, // 5.3 TB/s HBM3 (1.58× H100)
                 memory_capacity: 192_000_000_000, // 192 GB HBM3
                 on_chip_sram: 256_000_000, // ~256 MB Infinity Cache + L2
@@ -301,6 +353,8 @@ impl GpuSpec {
                 name: "MI325X".into(),
                 flops_bf16: 1307e12,
                 flops_fp8: 2614e12,
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: false,
                 memory_bandwidth: 6.0e12,         // 6.0 TB/s HBM3e
                 memory_capacity: 256_000_000_000, // 256 GB HBM3e
                 on_chip_sram: 256_000_000,
@@ -314,8 +368,10 @@ impl GpuSpec {
             // AMD Instinct MI355X (CDNA 4, 2025) — B200 competitor. FP4/FP6 not modeled.
             "mi355x" => Some(Self {
                 name: "MI355X".into(),
-                flops_bf16: 2500e12,              // ~2.5 PFLOPS BF16 dense
-                flops_fp8: 5000e12,               // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
+                flops_bf16: 2500e12, // ~2.5 PFLOPS BF16 dense
+                flops_fp8: 5000e12,  // ~5.0 PFLOPS FP8 dense (slightly ahead of B200)
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: false,
                 memory_bandwidth: 8.0e12,         // 8 TB/s HBM3e
                 memory_capacity: 288_000_000_000, // 288 GB HBM3e (50% more than B200)
                 on_chip_sram: 256_000_000,
@@ -330,6 +386,8 @@ impl GpuSpec {
                 name: "A10G".into(),
                 flops_bf16: 125e12,
                 flops_fp8: 0.0, // A10G does not have FP8 tensor cores
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: false,
                 memory_bandwidth: 600e9,
                 memory_capacity: 24_000_000_000,
                 on_chip_sram: 6_000_000, // 6 MB L2

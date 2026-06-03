@@ -35,9 +35,11 @@ pub fn preset(name: &str) -> Option<GpuSpec> {
             name: "GroqChip-1".into(),
             flops_bf16: 188e12, // 188 TFLOPS FP16 (BF16-equivalent for the roofline)
             flops_fp8: 375e12,  // FP8 ≈ 2× FP16; INT8 is 750 TOPS (Groq's primary serving dtype)
+            flops_fp4: 0.0,
+            supports_2to4_sparsity: false,
             memory_bandwidth: 80e12, // 80 TB/s on-chip SRAM (THE memory; no off-chip DRAM)
             memory_capacity: 230_000_000, // 230 MB — tiny vs GPU; high `--tp` is mandatory
-            on_chip_sram: 0,    // No two-tier memory: HBM field already IS the SRAM
+            on_chip_sram: 0,         // No two-tier memory: HBM field already IS the SRAM
             scale_up_bandwidth: 400e9, // C2C: 16 ports × ~25 GB/s aggregate per chip (approx.)
             // Per-hop C2C latency ~100 ns — this is what lets the simulator capture
             // why Groq's real TPOT at TP=358 is dominated by the chip-mesh diameter,

@@ -54,6 +54,7 @@ cargo run --release -- \
 - **[CLI reference](docs/cli.md)** — all flags, model presets, GPU presets
 - **[Latency model](docs/latency-model.md)** — roofline + MoE + EP math
 - **[Supported optimizations](docs/optimizations.md)** — batching, parallelism, spec/MTP
+- **[Quantization](docs/quantization.md)** — FP8, FP4, W4A16, W4A8KV4, and sparse NVFP4 modeling
 - **[Traces](docs/traces.md)** — public trace sources and the fetch script
 - **[Example results](docs/results.md)** — 14 representative simulation runs
 - **[Benchmark validation](docs/validation.md)** — MAPE vs real NVIDIA GPUs

@@ -63,6 +63,83 @@ fn fp8_prefill_uses_fp8_flops_on_h100() {
 }
 
 #[test]
+fn fp4_prefill_uses_fp4_flops_when_available() {
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let fp8 = LlmConfig::preset("llama-8b-fp8").unwrap();
+    let fp4 = LlmConfig::preset("llama-8b-w4a8kv4").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let fp8_ms = b200.prefill_latency(1, 512, &fp8, None, &c);
+    let fp4_ms = b200.prefill_latency(1, 512, &fp4, None, &c);
+
+    let ratio = fp8_ms / fp4_ms;
+    assert!(
+        close(ratio, 2.0, 0.02),
+        "expected 2x FP4 speedup from FP4 tensor cores, got {:.3}",
+        ratio
+    );
+}
+
+#[test]
+fn sparse_nvfp4_decode_gets_extra_two_x_on_supported_hardware() {
+    let b200 = GpuSpec::preset("b200").unwrap();
+    let dense = LlmConfig::preset("llama-70b-w4a8kv4").unwrap();
+    let sparse = LlmConfig::preset("llama-70b-nvfp4-sparse").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let dense_ms = b200.decode_latency(1, 256, &dense, None, &c);
+    let sparse_ms = b200.decode_latency(1, 256, &sparse, None, &c);
+
+    let ratio = dense_ms / sparse_ms;
+    assert!(
+        close(ratio, 2.0, 0.05),
+        "expected sparse NVFP4 decode to halve weight traffic, got {:.3}",
+        ratio
+    );
+}
+
+#[test]
+fn sparse_flag_is_ignored_without_hardware_support() {
+    let mi300x = GpuSpec::preset("mi300x").unwrap();
+    let dense = LlmConfig::preset("llama-70b-w4a8kv4").unwrap();
+    let sparse = LlmConfig::preset("llama-70b-nvfp4-sparse").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let dense_ms = mi300x.decode_latency(1, 256, &dense, None, &c);
+    let sparse_ms = mi300x.decode_latency(1, 256, &sparse, None, &c);
+
+    assert!(
+        close(dense_ms, sparse_ms, 0.001),
+        "sparse model should not speed up unsupported hardware"
+    );
+}
+
+#[test]
+fn w4a16_keeps_bf16_activation_traffic() {
+    let w4a16 = LlmConfig::preset("llama-8b-w4a16").unwrap();
+    let w4a8kv4 = LlmConfig::preset("llama-8b-w4a8kv4").unwrap();
+
+    assert_eq!(w4a16.weight_bits, 4);
+    assert_eq!(w4a16.effective_activation_bits(), 16);
+    assert_eq!(w4a16.activation_bytes(), 2);
+    assert_eq!(w4a8kv4.effective_activation_bits(), 8);
+    assert_eq!(w4a8kv4.activation_bytes(), 1);
+}
+
+#[test]
+fn w4a8kv4_halves_kv_vs_fp8() {
+    let fp8 = LlmConfig::preset("llama-8b-fp8").unwrap();
+    let w4a8kv4 = LlmConfig::preset("llama-8b-w4a8kv4").unwrap();
+
+    assert_eq!(w4a8kv4.effective_kv_bits(), 4);
+    assert!(close(
+        fp8.kv_bytes(1024) as f64 / w4a8kv4.kv_bytes(1024) as f64,
+        2.0,
+        0.001
+    ));
+}
+
+#[test]
 fn tp_scales_decode_inversely_with_degree() {
     // With TP=N, single-GPU latency should drop by ~N (memory-bound; ignoring all-reduce).
     let gpu = GpuSpec::preset("h100").unwrap();
