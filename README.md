@@ -9,12 +9,12 @@ before you provision the GPUs.
 - **Parallelism** — tensor (TP), pipeline (PP), expert (EP), disaggregated prefill/decode
 - **Speedups** — speculative decoding, multi-token prediction, paged KV cache, MLA KV compression
 - **Models** — dense (Llama 8B / 70B + FP8) and MoE (Mixtral, Llama 4 Maverick / Behemoth, DeepSeek V3, Kimi K2 1 T)
-- **Hardware** — NVIDIA rubin (2026) / b200 / h200 / h100 / a100 / a10g, AMD mi300x / mi325x / mi355x, Google TPU v7-ironwood / 8t / 8i, Groq lpu-v1, Cerebras CS-3 / WSE-3
-- **Systems** — DGX H100 / H200 / B200 presets with 8-GPU scale-up nodes and NDR-class scale-out defaults
+- **Hardware** — NVIDIA Rubin / B200 / H200 / H100 / A100 / A10G, AMD MI300X / MI325X / MI355X, Google TPU v7 Ironwood / 8t / 8i, Groq LPU v1, Cerebras CS-3 / WSE-3
+- **Systems** — DGX H100 / H200 / B200 presets with 8-GPU NVLink/NVSwitch nodes and NDR-class scale-out defaults
 - **Latency prediction** — TTFT / TPOT histograms (p50 / p95 / p99), throughput, KV utilization, preemption counts
 - **Energy prediction** — per-chip TDP model, total kJ, mean kW, energy per output token
 - **Cost prediction** — GPU-hour pricing, total $, $ per million tokens, $ per request
-- **Reports** — matrix studies with JSON data and self-contained HTML comparisons
+- **Reports** — matrix studies with JSON data and a GitHub Pages dashboard
 
 Targets ~10% error vs real GPU kernel time on validated configs (see [docs/validation.md](docs/validation.md)).
 Collective formulas model one scale-up domain by default and can add a scale-out

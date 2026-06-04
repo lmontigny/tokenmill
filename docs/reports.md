@@ -10,7 +10,8 @@ TP degree, and arrival rate, then writes:
 The GitHub Pages site uses `reports/dashboard.html` as the single public report
 UI. Curated datasets should be committed as JSON under `reports/curated/` and
 listed in `reports/manifest.json`; standalone HTML reports are best kept under
-`reports/scratch/` for local review.
+`reports/scratch/` for local review. The root Pages entry point redirects to
+that dashboard.
 
 Example:
 

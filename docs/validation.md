@@ -21,7 +21,10 @@ Results against `data/reference_kernels.csv` (GPU kernel time only; serving fram
 | H100-SXM5 | llama-8b-fp8 | decode | ~13% | TRT-LLM FP8; degrades at large batch×seq |
 | H100-SXM5 | llama-70b (bf16) | all | <1% | MLPerf v4.0 / vLLM TP=8 |
 | A100-80GB | llama-8b (bf16) | all | <1% | vLLM benchmark |
+| H200-SXM5 | — | — | _spec-backed, not kernel-validated_ | Same Hopper tensor core peak as H100; decode uses larger/faster HBM3e |
+| B200-SXM / Rubin-SXM | — | — | _spec-backed, partially validated_ | B200 FP4/NVFP4 comparison lives in [`quantization-validation.md`](quantization-validation.md); Rubin is public-spec only |
 | MI300X / MI325X / MI355X | — | — | _not yet validated_ | Add rows to `reference_kernels.csv` if you have ROCm/vLLM profiling data |
+| TPU / Groq / Cerebras | — | — | _not kernel-validated_ | Presets are public-spec roofline models; production calibration needs vendor-specific traces or kernel tables |
 
 ## Key findings
 

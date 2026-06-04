@@ -31,6 +31,7 @@ The simulator tracks `prefill_busy_secs` and `decode_busy_secs` per chip by hook
 
 | Accelerator | TDP | Source |
 |---|---:|---|
+| Rubin SXM | 1500 W | estimate; public per-chip TDP not yet stable |
 | B200 SXM | 1000 W | NVIDIA |
 | H200 SXM | 700 W | NVIDIA |
 | H100 SXM5 | 700 W | NVIDIA |
@@ -43,6 +44,7 @@ The simulator tracks `prefill_busy_secs` and `decode_busy_secs` per chip by hook
 | TPU 8t | 750 W | estimate |
 | TPU v7 Ironwood | 500 W | estimate |
 | Groq LPU v1 | 215 W | Groq published typical (peak ~300 W) |
+| Cerebras CS-3 / WSE-3 | 23000 W | system-level estimate, not per-chip |
 
 ## Output
 

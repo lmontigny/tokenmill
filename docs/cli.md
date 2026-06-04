@@ -17,7 +17,7 @@
 | `--pp` | `1` | Pipeline parallelism degree |
 | `--ep` | `1` | Expert parallelism degree (MoE models) |
 | `--gpus-per-node` | `8` | Accelerators in one scale-up node before TP/PP/EP crosses scale-out networking |
-| `--scale-out-fabric` | `none` | Scale-out preset: `none` \| `hdr-200` \| `ndr-400` \| `quantum-x800` \| `spectrum-x400` \| `spectrum-x800` |
+| `--scale-out-fabric` | `none` | Scale-out preset: `none` \| `hdr-200` \| `ndr-400` \| `quantum-x800` / `xdr-800` \| `spectrum-x400` \| `spectrum-x800` |
 | `--scale-out-bw-gbps` | `0` | Scale-out bandwidth for cross-node TP/PP/EP collectives in GB/s; `0` keeps legacy uniform scale-up behavior |
 | `--scale-out-latency-us` | `5` | One-way scale-out latency for cross-node TP/PP/EP collectives |
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
@@ -94,6 +94,11 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 | `dgx-h100` | `--gpu h100` | 8 GPUs | `ndr-400` | DGX H100: 8 H100 GPUs, 640 GB total HBM, NVLink 4 / NVSwitch inside the system |
 | `dgx-h200` | `--gpu h200` | 8 GPUs | `ndr-400` | DGX H200: 8 H200 GPUs, 1,128 GB total HBM3e |
 | `dgx-b200` | `--gpu b200` | 8 GPUs | `ndr-400` | DGX B200: 8 B200 GPUs, 1,440 GB total HBM3e, NVLink 5 / NVSwitch inside the system |
+
+System presets are convenience defaults. They resolve the GPU preset, set
+`--gpus-per-node 8`, and enable `ndr-400` scale-out when no explicit scale-out
+fabric or bandwidth override is provided. Override `--scale-out-fabric` for
+Spectrum-X Ethernet or Quantum-X800 / XDR-class InfiniBand studies.
 
 † Google doesn't publish per-chip TPU TDP; values are estimates from the "2× perf/W vs Ironwood" claim.
 

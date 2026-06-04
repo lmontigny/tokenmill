@@ -2,6 +2,10 @@
 
 Simulated results for various model/GPU/scheduler configurations (60 s runs, log-normal prompts μ=512 tokens, outputs μ=128 tokens). The **Energy/tok** column comes from the per-chip TDP model in [`docs/power.md`](power.md); the **$ / Mtok** column is computed from on-demand list prices in [`docs/cost.md`](cost.md).
 
+This Markdown table is a fixed snapshot. For current curated comparisons across
+system, GPU, model, precision, cost, latency, and energy, use the GitHub Pages
+dashboard generated from `reports/manifest.json` and `reports/curated/*.json`.
+
 | # | Model | GPU / TP | Scheduler | Rate (req/s) | Thrpt (rps) | TTFT p50 | TTFT p95 | TPOT p50 | Energy/tok | $ / Mtok | Notes |
 |---|-------|----------|-----------|:---:|:---:|---:|---:|---:|---:|---:|---|
 | 1 | llama-8b-fp8 | H100 TP=1 | continuous-batch | 10 | 9.9 | 13 ms | 23 ms | 3.2 ms | 364 mJ | $0.77 | Light-load baseline (idle power dominates → high $/Mtok) |

@@ -8,7 +8,7 @@ them off a min-heap in order and dispatches each to the right handler.
 
 ```
 engine/        DES core: BinaryHeap event queue, SimTime clock, dispatch loop
-hardware/      GPU specs, cluster topology (TP/PP/EP), kernel time table
+hardware/      accelerator specs, cluster topology (TP/PP/EP), kernel time table
 model/         LLM config (dense + MoE), KV cache block manager
 scheduler/     continuous-batch (Orca) and chunked-prefill (Sarathi)
 workload/      Poisson synthetic arrivals, trace replay (Azure + native CSV)
@@ -23,8 +23,8 @@ metrics/       HDR histograms for TTFT/TPOT, throughput, KV utilization
 
 ## Hardware
 
-- `GpuSpec` — peak FLOPS (BF16/FP8), memory bandwidth + capacity, scale-up fabric bandwidth, MFU calibration. Presets cover NVIDIA, AMD, Google TPU, Groq, and Cerebras accelerators.
-- `ClusterConfig` — TP/PP/EP degrees, NVLink + internode bandwidth, disaggregation flag. All collective formulas (ring-allreduce, EP all-to-all, PP transfer, KV transfer) live here.
+- `GpuSpec` — peak FLOPS (BF16/FP8/FP4), memory bandwidth + capacity, on-chip SRAM, scale-up fabric bandwidth/latency, TDP, chip-hour cost, and MFU calibration. Presets cover NVIDIA, AMD, Google TPU, Groq, and Cerebras accelerators.
+- `ClusterConfig` — TP/PP/EP degrees, scale-up bandwidth, optional scale-out bandwidth/latency, node size, and disaggregation flag. All collective formulas (hierarchical ring-allreduce, EP all-to-all, PP transfer, KV transfer) live here.
 - `KernelTable` — optional CSV of profiled kernel latencies, looked up by (gpu, model, op, batch, seq_len) with linear interpolation on `seq_len`. Roofline fallback on miss.
 
 ## Model
