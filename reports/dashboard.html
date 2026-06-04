@@ -51,7 +51,7 @@
     }
     .filters {
       display: grid;
-      grid-template-columns: minmax(220px, 2fr) repeat(6, minmax(130px, 1fr));
+      grid-template-columns: minmax(220px, 2fr) repeat(7, minmax(130px, 1fr));
       gap: 10px;
     }
     input, select {
@@ -86,6 +86,26 @@
     .small {
       color: var(--muted);
       margin-top: 4px;
+    }
+    .coverage {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      color: var(--ink);
+      padding: 3px 8px;
+      font-size: 12px;
+      line-height: 1.4;
     }
     .charts {
       display: grid;
@@ -148,7 +168,8 @@
     th:nth-child(2), td:nth-child(2),
     th:nth-child(3), td:nth-child(3),
     th:nth-child(4), td:nth-child(4),
-    th:nth-child(5), td:nth-child(5) {
+    th:nth-child(5), td:nth-child(5),
+    th:nth-child(6), td:nth-child(6) {
       text-align: left;
     }
     .status {
@@ -192,6 +213,7 @@
       <div class="filters">
         <input id="search" placeholder="Search model, GPU, system, report">
         <select id="system"><option value="">All systems</option></select>
+        <select id="hardware"><option value="">All HW presets</option></select>
         <select id="gpu"><option value="">All GPUs</option></select>
         <select id="model"><option value="">All models</option></select>
         <select id="precision"><option value="">All precision</option></select>
@@ -201,6 +223,10 @@
       <div class="status" id="status">Loading curated datasets...</div>
     </section>
     <div class="cards" id="cards"></div>
+    <section class="panel">
+      <h2>Supported Coverage</h2>
+      <div class="coverage" id="coverage"></div>
+    </section>
     <section class="panel">
       <h2>Charts</h2>
       <div class="legend" id="legend"></div>
@@ -223,6 +249,8 @@
     let sortKey = 'cost_per_million_tokens_usd';
     let sortDir = 1;
 
+    const dataVersion = 'coverage-2026-06-04';
+    let manifestRows = [];
     const reportMeta = new Map();
     const precisionColors = {
       'BF16/FP16': '#64748b',
@@ -248,6 +276,27 @@
       if (gpu.includes('h100') && meta.systems.includes('dgx-h100')) return 'dgx-h100';
       return meta.systems.join(',');
     }
+    function hardwarePresetForRow(row, meta) {
+      const gpu = row.gpu.toLowerCase();
+      const candidates = meta.hardware || [];
+      const direct = candidates.find(h => gpu.includes(h.toLowerCase()));
+      if (direct) return direct;
+      if (gpu.includes('rubin')) return 'rubin';
+      if (gpu.includes('b200')) return 'b200';
+      if (gpu.includes('h200')) return 'h200';
+      if (gpu.includes('h100')) return 'h100';
+      if (gpu.includes('a100')) return 'a100';
+      if (gpu.includes('a10g')) return 'a10g';
+      if (gpu.includes('mi355')) return 'mi355x';
+      if (gpu.includes('mi325')) return 'mi325x';
+      if (gpu.includes('mi300')) return 'mi300x';
+      if (gpu.includes('tpu-8i')) return 'tpu-v8i';
+      if (gpu.includes('tpu-8t')) return 'tpu-v8t';
+      if (gpu.includes('ironwood')) return 'tpu-v7-ironwood';
+      if (gpu.includes('groq')) return 'groq-lpu-v1';
+      if (gpu.includes('cerebras')) return 'cerebras-cs3';
+      return candidates[0] || row.gpu;
+    }
     function fmt(v, d = 1) {
       if (!Number.isFinite(v)) return '';
       return Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
@@ -256,7 +305,7 @@
       return precisionColors[row._precision] || '#475569';
     }
     function configLabel(row) {
-      return `${row.model} · ${row._system} · ${row.gpu} · TP=${row.tp}`;
+      return `${row.model} · ${row._system} · ${row._hardware} (${row.gpu}) · TP=${row.tp}`;
     }
     function uniq(values) {
       return [...new Set(values.filter(v => v !== undefined && v !== null && v !== ''))].sort((a, b) => String(a).localeCompare(String(b)));
@@ -271,13 +320,14 @@
       }
     }
     async function loadData() {
-      const manifest = await fetch('manifest.json').then(r => {
+      const manifest = await fetch(`manifest.json?v=${dataVersion}`).then(r => {
         if (!r.ok) throw new Error(`Failed to load manifest: ${r.status}`);
         return r.json();
       });
+      manifestRows = manifest;
       for (const meta of manifest) {
         reportMeta.set(meta.id, meta);
-        const data = await fetch(meta.json).then(r => {
+        const data = await fetch(`${meta.json}?v=${dataVersion}`).then(r => {
           if (!r.ok) throw new Error(`Failed to load ${meta.json}: ${r.status}`);
           return r.json();
         });
@@ -286,27 +336,31 @@
           _report_id: meta.id,
           _report_title: meta.title,
           _system: systemForRow(row, meta),
+          _hardware: hardwarePresetForRow(row, meta),
           _precision: precision(row.model),
           _tags: meta.tags || [],
         })));
       }
       setupFilters();
+      renderCoverage();
       render();
     }
     function setupFilters() {
       addOptions('system', uniq(rows.map(r => r._system)));
+      addOptions('hardware', uniq(rows.map(r => r._hardware)));
       addOptions('gpu', uniq(rows.map(r => r.gpu)));
       addOptions('model', uniq(rows.map(r => r.model)));
       addOptions('precision', uniq(rows.map(r => r._precision)));
       addOptions('tp', uniq(rows.map(r => String(r.tp))).sort((a, b) => Number(a) - Number(b)));
       addOptions('report', uniq(rows.map(r => r._report_title)));
-      ['search', 'system', 'gpu', 'model', 'precision', 'tp', 'report'].forEach(id => {
+      ['search', 'system', 'hardware', 'gpu', 'model', 'precision', 'tp', 'report'].forEach(id => {
         document.getElementById(id).addEventListener('input', render);
       });
     }
     function filtered() {
       const q = document.getElementById('search').value.toLowerCase();
       const system = document.getElementById('system').value;
+      const hardware = document.getElementById('hardware').value;
       const gpu = document.getElementById('gpu').value;
       const model = document.getElementById('model').value;
       const precisionFilter = document.getElementById('precision').value;
@@ -314,10 +368,11 @@
       const report = document.getElementById('report').value;
       return rows.filter(r => {
         const haystack = [
-          r.model, r.gpu, r.scheduler, r._system, r._precision, r._report_title, ...r._tags
+          r.model, r.gpu, r._hardware, r.scheduler, r._system, r._precision, r._report_title, ...r._tags
         ].join(' ').toLowerCase();
         return (!q || haystack.includes(q)) &&
           (!system || r._system === system) &&
+          (!hardware || r._hardware === hardware) &&
           (!gpu || r.gpu === gpu) &&
           (!model || r.model === model) &&
           (!precisionFilter || r._precision === precisionFilter) &&
@@ -331,7 +386,7 @@
       return valid[0];
     }
     function card(label, row, value) {
-      return `<div class="card"><div class="label">${label}</div><div class="value">${row ? value(row) : 'n/a'}</div><div class="small">${row ? `${row.model} · ${row._system} · ${row.gpu}` : ''}</div></div>`;
+      return `<div class="card"><div class="label">${label}</div><div class="value">${row ? value(row) : 'n/a'}</div><div class="small">${row ? `${row.model} · ${row._system} · ${row._hardware}` : ''}</div></div>`;
     }
     function renderCards(data) {
       const cards = [
@@ -342,6 +397,23 @@
       ];
       document.getElementById('cards').innerHTML = cards.join('');
     }
+    function chipList(values) {
+      return uniq(values).map(v => `<span class="chip">${v}</span>`).join('');
+    }
+    function renderCoverage() {
+      const models = manifestRows.flatMap(m => m.models || []);
+      const hardware = manifestRows.flatMap(m => m.hardware || []);
+      const systems = manifestRows.flatMap(m => m.systems || []);
+      const precision = manifestRows.flatMap(m => m.precision || []);
+      const reports = manifestRows.map(m => `${m.title} (${m.rows} rows)`);
+      document.getElementById('coverage').innerHTML = [
+        ['Models', models],
+        ['Hardware Presets', hardware],
+        ['System Presets', systems],
+        ['Precision', precision],
+        ['Curated Datasets', reports],
+      ].map(([title, values]) => `<div><div class="label">${title} (${uniq(values).length})</div><div class="chips">${chipList(values)}</div></div>`).join('');
+    }
     function renderLegend(data) {
       const precision = uniq(data.map(r => r._precision));
       document.getElementById('legend').innerHTML = precision.map(p =>
@@ -350,7 +422,7 @@
     }
     function renderTable(data) {
       const cols = [
-        ['_report_title', 'Report'], ['_system', 'System'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
+        ['_report_title', 'Report'], ['_system', 'System'], ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
         ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Tok/s'],
         ['ttft_p95_ms', 'TTFT p95'], ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'],
         ['energy_per_token_mj', 'mJ/token'], ['kv_util_mean_pct', 'KV %']
@@ -361,7 +433,7 @@
       });
       const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}</th>`).join('') + '</tr>';
       const body = sorted.map(r => `<tr>
-        <td>${r._report_title}</td><td>${r._system}</td><td>${r.gpu}</td><td>${r.model}</td><td>${r._precision}</td>
+        <td>${r._report_title}</td><td>${r._system}</td><td>${r._hardware}</td><td>${r.gpu}</td><td>${r.model}</td><td>${r._precision}</td>
         <td>${r.tp}</td><td>${r.pp}</td><td>${fmt(r.arrival_rate, 2)}</td><td>${r.completions}</td><td>${fmt(r.token_throughput, 0)}</td>
         <td>${fmt(r.ttft_p95_ms, 1)}</td><td>${fmt(r.tpot_p95_ms, 1)}</td><td>${fmt(r.cost_per_million_tokens_usd, 2)}</td>
         <td>${fmt(r.energy_per_token_mj, 1)}</td><td>${fmt(r.kv_util_mean_pct, 1)}</td>
