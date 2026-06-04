@@ -16,6 +16,7 @@
 | `--pp` | `1` | Pipeline parallelism degree |
 | `--ep` | `1` | Expert parallelism degree (MoE models) |
 | `--gpus-per-node` | `8` | Accelerators in one scale-up node before TP/PP/EP crosses scale-out networking |
+| `--scale-out-fabric` | `none` | Scale-out preset: `none` \| `hdr-200` \| `ndr-400` \| `quantum-x800` \| `spectrum-x400` \| `spectrum-x800` |
 | `--scale-out-bw-gbps` | `0` | Scale-out bandwidth for cross-node TP/PP/EP collectives in GB/s; `0` keeps legacy uniform scale-up behavior |
 | `--scale-out-latency-us` | `5` | One-way scale-out latency for cross-node TP/PP/EP collectives |
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |

@@ -39,6 +39,15 @@ tokenmill --gpu b200 --model llama-70b-fp8 \
   --scale-out-bw-gbps 50 --scale-out-latency-us 5
 ```
 
+For multi-rack NVIDIA GB200 NVL72-style deployments, treat one NVL72 rack as
+the scale-up island:
+
+```bash
+tokenmill --gpu b200 --model llama-70b-fp8 \
+  --tp 144 --gpus-per-node 72 \
+  --scale-out-fabric quantum-x800
+```
+
 The simulator then treats parallel groups larger than `--gpus-per-node` as
 cross-node:
 
@@ -57,8 +66,31 @@ Typical `--scale-out-bw-gbps` examples:
 | 400 GbE / NDR IB | ~50 GB/s | `--scale-out-bw-gbps 50` |
 | 800 GbE / XDR-class IB | ~100 GB/s | `--scale-out-bw-gbps 100` |
 
+Named presets set the same bandwidth plus conservative latency defaults:
+
+| Preset | Bandwidth | Latency | Intended use |
+|---|---:|---:|---|
+| `hdr-200` | 25 GB/s | 3 us | 200 Gb/s IB/Ethernet fabrics |
+| `ndr-400` | 50 GB/s | 2 us | ConnectX-7 / Quantum-2 NDR InfiniBand |
+| `quantum-x800` | 100 GB/s | 2 us | Quantum-X800 / ConnectX-8 800 Gb/s InfiniBand |
+| `spectrum-x400` | 50 GB/s | 5 us | Spectrum-X / ConnectX Ethernet at 400 Gb/s |
+| `spectrum-x800` | 100 GB/s | 5 us | Spectrum-X800 / ConnectX-8 800 Gb/s Ethernet |
+
 Use the effective bandwidth available to one accelerator after NIC sharing,
 PCIe, routing, and congestion, not just the switch headline.
+
+Source validation:
+
+- [NVIDIA Quantum-X800 InfiniBand](https://www.nvidia.com/en-us/networking/products/infiniband/quantum-x800/)
+  documentation lists 144 ports of 800 Gb/s per switch and ConnectX-8 /
+  ConnectX-9 SuperNICs for the platform.
+- [NVIDIA X800 announcement](https://nvidianews.nvidia.com/news/networking-switches-gpu-computing-ai)
+  describes Quantum-X800 InfiniBand and Spectrum-X800 Ethernet as end-to-end
+  800 Gb/s networking platforms.
+- [NVIDIA ConnectX-8 documentation](https://docs.nvidia.com/networking/display/connectx8supernic/introduction)
+  states support for both InfiniBand and Ethernet up to 800 Gb/s.
+- [NVIDIA ConnectX-7 documentation](https://www.nvidia.com/content/dam/en-zz/Solutions/networking/infiniband-adapters/infiniband-connectx7-data-sheet.pdf)
+  lists 400 Gb/s NDR InfiniBand adapters.
 
 ## What's still not modelled
 

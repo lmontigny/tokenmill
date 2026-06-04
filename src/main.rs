@@ -82,6 +82,10 @@ struct Args {
     #[arg(long, default_value_t = 8)]
     gpus_per_node: u32,
 
+    /// Scale-out fabric preset: none | hdr-200 | ndr-400 | quantum-x800 | spectrum-x400 | spectrum-x800
+    #[arg(long, default_value = "none")]
+    scale_out_fabric: String,
+
     /// Scale-out network bandwidth for cross-node TP/PP/EP collectives (GB/s). 0 = legacy uniform scale-up model.
     #[arg(long, default_value_t = 0.0)]
     scale_out_bw_gbps: f64,
@@ -412,16 +416,74 @@ fn build_cluster_desc(args: &Args, gpu: &GpuSpec) -> String {
     if args.ep > 1 {
         parts.push(format!("EP={}", args.ep));
     }
-    if args.scale_out_bw_gbps > 0.0 {
+    let scale_out = scale_out_config(args);
+    if scale_out.bw_gbps > 0.0 {
         parts.push(format!(
-            "{} GPU/node, scale-out {:.0} GB/s",
-            args.gpus_per_node, args.scale_out_bw_gbps
+            "{} GPU/node, {} {:.0} GB/s",
+            args.gpus_per_node, scale_out.label, scale_out.bw_gbps
         ));
     }
     if args.disaggregate {
         parts.push("disaggregated P/D".to_string());
     }
     parts.join("  |  ")
+}
+
+#[derive(Clone)]
+struct ScaleOutConfig {
+    label: String,
+    bw_gbps: f64,
+    latency_us: f64,
+}
+
+fn scale_out_config(args: &Args) -> ScaleOutConfig {
+    let preset = match args.scale_out_fabric.as_str() {
+        "none" => ScaleOutConfig {
+            label: "scale-out".into(),
+            bw_gbps: 0.0,
+            latency_us: args.scale_out_latency_us,
+        },
+        "hdr-200" => ScaleOutConfig {
+            label: "HDR/200G".into(),
+            bw_gbps: 25.0,
+            latency_us: 3.0,
+        },
+        "ndr-400" => ScaleOutConfig {
+            label: "NDR/400G".into(),
+            bw_gbps: 50.0,
+            latency_us: 2.0,
+        },
+        "quantum-x800" | "xdr-800" => ScaleOutConfig {
+            label: "Quantum-X800/800G".into(),
+            bw_gbps: 100.0,
+            latency_us: 2.0,
+        },
+        "spectrum-x400" => ScaleOutConfig {
+            label: "Spectrum-X/400G".into(),
+            bw_gbps: 50.0,
+            latency_us: 5.0,
+        },
+        "spectrum-x800" => ScaleOutConfig {
+            label: "Spectrum-X800/800G".into(),
+            bw_gbps: 100.0,
+            latency_us: 5.0,
+        },
+        other => panic!("Unknown scale-out fabric '{}'", other),
+    };
+
+    ScaleOutConfig {
+        label: preset.label,
+        bw_gbps: if args.scale_out_bw_gbps > 0.0 {
+            args.scale_out_bw_gbps
+        } else {
+            preset.bw_gbps
+        },
+        latency_us: if args.scale_out_latency_us != 5.0 {
+            args.scale_out_latency_us
+        } else {
+            preset.latency_us
+        },
+    }
 }
 
 fn fmt_with_commas(n: u64) -> String {
@@ -461,6 +523,7 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         other => panic!("Unknown scheduler '{}'", other),
     };
 
+    let scale_out = scale_out_config(args);
     let cluster = ClusterConfig {
         tp: args.tp,
         pp: args.pp,
@@ -468,8 +531,8 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         scale_up_bw: gpu_spec.scale_up_bandwidth,
         scale_up_latency: gpu_spec.scale_up_latency,
         gpus_per_node: args.gpus_per_node,
-        scale_out_bw: args.scale_out_bw_gbps * 1e9,
-        scale_out_latency: args.scale_out_latency_us * 1e-6,
+        scale_out_bw: scale_out.bw_gbps * 1e9,
+        scale_out_latency: scale_out.latency_us * 1e-6,
         internode_bw: args.internode_bw_gbps * 1e9,
         disaggregate: args.disaggregate,
     };
