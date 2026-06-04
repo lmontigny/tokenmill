@@ -21,6 +21,9 @@ Current curated reports:
   compares Llama 8B FP8 and W4A8KV4 across every non-Groq accelerator preset.
 - [`curated/dgx-system-precision-coverage.json`](curated/dgx-system-precision-coverage.json)
   compares DGX H100, H200, and B200 systems for Llama 70B FP8, W4A8KV4, and sparse NVFP4.
+- [`curated/llama70b-fp8-accelerator-coverage.json`](curated/llama70b-fp8-accelerator-coverage.json)
+  compares Llama 70B FP8 across high-end accelerator presets with a 1000/1000
+  token workload at RPS 1, 5, and 25.
 - [`curated/b200-model-coverage.json`](curated/b200-model-coverage.json)
   runs every supported model preset on B200.
 - [`curated/frontier-moe-accelerator-coverage.json`](curated/frontier-moe-accelerator-coverage.json)
@@ -92,6 +95,19 @@ cargo run --release -- \
   --output-mean 256 \
   --duration 10 \
   --json-out reports/curated/dgx-system-precision-coverage.json
+```
+
+```bash
+cargo run --release -- \
+  --study-models llama-70b-fp8 \
+  --study-gpus rubin,b200,h200,h100,a100,mi355x,mi325x,mi300x,tpu-v8i,tpu-v8t,tpu-v7-ironwood \
+  --study-tps 1 \
+  --study-arrival-rates 1,5,25 \
+  --scheduler chunked-prefill \
+  --prompt-mean 1000 \
+  --output-mean 1000 \
+  --duration 60 \
+  --json-out reports/curated/llama70b-fp8-accelerator-coverage.json
 ```
 
 ```bash

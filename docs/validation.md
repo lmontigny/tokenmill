@@ -44,6 +44,38 @@ TTFT/TPOT needs a kernel table or model-specific calibration for MoE routing,
 expert all-to-all, framework scheduler overhead, CUDA/ROCm graph behavior,
 DeepGEMM/FlashMLA kernels, and batching policy.
 
+## Llama 70B FP8 online validation
+
+NVIDIA publishes NIM 1.8.0 results for Llama 3.3 70B Instruct with FP8 TP2 on
+2x H100 and 2x H200. The closest local validation run uses `llama-70b-fp8`,
+TP=2, 1000 input / 1000 output tokens, chunked prefill, and RPS 1:
+
+```bash
+cargo run --release -- \
+  --study-models llama-70b-fp8 \
+  --study-gpus h100,h200 \
+  --study-tps 2 \
+  --study-arrival-rates 1,5,25 \
+  --scheduler chunked-prefill \
+  --prompt-mean 1000 \
+  --output-mean 1000 \
+  --duration 60 \
+  --json-out reports/scratch/llama70b-fp8-nvidia-nim-tp2-validation.json
+```
+
+| Source | Hardware / setup | Public result | Local comparable scratch run | Delta |
+|---|---|---|---|---|
+| [NVIDIA NIM Llama 3.3 70B Instruct](https://docs.nvidia.com/nim/benchmarking/llm/1.0.0/performance.html#llama-3-3-70b-instruct-results) | 2x H100, FP8 TP2, 1000/1000, concurrency 1 | TTFT 82.46 ms, ITL 18.67 ms | H100 TP=2, RPS 1: p50 TTFT 87.2 ms, p50 TPOT 14.7 ms | TTFT +5.7%, TPOT -21.3% |
+| [NVIDIA NIM Llama 3.3 70B Instruct](https://docs.nvidia.com/nim/benchmarking/llm/1.0.0/performance.html#llama-3-3-70b-instruct-results) | 2x H200, FP8 TP2, 1000/1000, concurrency 1 | TTFT 81.45 ms, ITL 16.72 ms | H200 TP=2, RPS 1: p50 TTFT 73.9 ms, p50 TPOT 10.3 ms | TTFT -9.2%, TPOT -38.6% |
+
+Result: **TTFT is within the <10% target for the low-load H100/H200 validation
+points, but TPOT is not.** The decode path is still too optimistic because the
+generic roofline uses sustained memory bandwidth and does not yet model all
+serving overheads from NIM/TensorRT-LLM, including scheduler, launch, collective,
+and paged-KV effects. The dashboard's Llama 70B FP8 rows should be treated as
+relative hardware estimates until a calibrated kernel table is added for
+H100/H200 FP8 decode.
+
 ## Key findings
 
 - **Prefill** (compute-bound): ~8% MAPE on FP8. `flops_fp8` and `flops_fp4` are selected from `weight_bits`; FP4 paths should be calibrated with kernel tables before production use.
