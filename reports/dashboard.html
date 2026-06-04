@@ -149,6 +149,30 @@
     .table-wrap {
       overflow-x: auto;
     }
+    .bar-cell {
+      min-width: 110px;
+    }
+    .metric-bar {
+      height: 6px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .metric-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 999px;
+    }
+    details.panel {
+      display: block;
+    }
+    summary {
+      cursor: pointer;
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0;
+    }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -228,6 +252,13 @@
     </section>
     <div class="cards" id="cards"></div>
     <section class="panel">
+      <h2>Hardware Compare</h2>
+      <div class="note">Uses the current filters and keeps the lowest-TPOT row per hardware preset. Select one model and precision for the cleanest hardware-to-hardware comparison.</div>
+      <div class="table-wrap">
+        <table id="compare"></table>
+      </div>
+    </section>
+    <section class="panel">
       <h2>Supported Coverage</h2>
       <div class="coverage" id="coverage"></div>
     </section>
@@ -242,12 +273,13 @@
         <div class="chart"><div class="chart-head"><div class="label">TPOT p95 by configuration</div></div><svg id="tpot"></svg></div>
       </div>
     </section>
-    <section class="panel">
-      <h2>All Results</h2>
+    <details class="panel">
+      <summary>All Results</summary>
+      <div class="note">Raw rows behind the comparison views. Use this when you need every model, hardware, precision, TP, and arrival-rate combination.</div>
       <div class="table-wrap">
         <table id="results"></table>
       </div>
-    </section>
+    </details>
   </main>
   <script>
     let rows = [];
@@ -425,6 +457,51 @@
         `<span class="legend-item"><span class="swatch" style="background:${precisionColors[p] || '#475569'}"></span>${p}</span>`
       ).join('');
     }
+    function bestPerHardware(data) {
+      const byHardware = new Map();
+      for (const row of data) {
+        const prev = byHardware.get(row._hardware);
+        if (!prev || row.tpot_p95_ms < prev.tpot_p95_ms) {
+          byHardware.set(row._hardware, row);
+        }
+      }
+      return [...byHardware.values()].sort((a, b) => a.tpot_p95_ms - b.tpot_p95_ms);
+    }
+    function metricBar(value, max, lowerIsBetter) {
+      if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(max) || max <= 0) return '';
+      const pct = Math.max(4, Math.min(100, lowerIsBetter ? 100 * value / max : 100 * value / max));
+      return `<div class="metric-bar"><div class="metric-fill" style="width:${pct}%"></div></div>`;
+    }
+    function renderCompare(data) {
+      const rows = bestPerHardware(data);
+      const table = document.getElementById('compare');
+      if (rows.length === 0) {
+        table.innerHTML = '<tr><td>No rows match the current filters.</td></tr>';
+        return;
+      }
+      const maxTpot = Math.max(...rows.map(r => r.tpot_p95_ms || 0), 1);
+      const maxCost = Math.max(...rows.map(r => r.cost_per_million_tokens_usd || 0), 1);
+      const maxEnergy = Math.max(...rows.map(r => r.energy_per_token_mj || 0), 1);
+      const maxThroughput = Math.max(...rows.map(r => r.token_throughput || 0), 1);
+      const head = `<tr>
+        <th>HW preset</th><th>GPU</th><th>Model</th><th>Precision</th><th>TP</th><th>RPS</th>
+        <th>Tok/s</th><th>TTFT p95</th><th>TPOT p95</th><th>$/Mtok</th><th>mJ/token</th>
+      </tr>`;
+      const body = rows.map(r => `<tr>
+        <td>${r._hardware}</td>
+        <td>${r.gpu}</td>
+        <td>${r.model}</td>
+        <td>${r._precision}</td>
+        <td>${r.tp}</td>
+        <td>${fmt(r.arrival_rate, 2)}</td>
+        <td class="bar-cell">${fmt(r.token_throughput, 0)}${metricBar(r.token_throughput, maxThroughput, false)}</td>
+        <td>${fmt(r.ttft_p95_ms, 1)} ms</td>
+        <td class="bar-cell">${fmt(r.tpot_p95_ms, 2)} ms${metricBar(r.tpot_p95_ms, maxTpot, true)}</td>
+        <td class="bar-cell">$${fmt(r.cost_per_million_tokens_usd, 2)}${metricBar(r.cost_per_million_tokens_usd, maxCost, true)}</td>
+        <td class="bar-cell">${fmt(r.energy_per_token_mj, 1)}${metricBar(r.energy_per_token_mj, maxEnergy, true)}</td>
+      </tr>`).join('');
+      table.innerHTML = head + body;
+    }
     function renderTable(data) {
       const cols = [
         ['_report_title', 'Report'], ['_system', 'System'], ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
@@ -514,6 +591,7 @@
       const data = filtered();
       document.getElementById('status').textContent = `${data.length} of ${rows.length} rows shown`;
       renderCards(data);
+      renderCompare(data);
       renderLegend(data);
       renderTable(data);
       drawScatter(data);
