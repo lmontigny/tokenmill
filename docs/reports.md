@@ -7,6 +7,11 @@ TP degree, and arrival rate, then writes:
 - a normalized JSON result file for automation
 - a self-contained HTML file for review and sharing
 
+The GitHub Pages site uses `reports/dashboard.html` as the single public report
+UI. Curated datasets should be committed as JSON under `reports/curated/` and
+listed in `reports/manifest.json`; standalone HTML reports are best kept under
+`reports/scratch/` for local review.
+
 Example:
 
 ```bash
@@ -32,7 +37,8 @@ tokenmill \
   --study-tps 8,16 \
   --study-arrival-rates 1,5 \
   --duration 60 \
-  --html reports/dgx-comparison.html
+  --json-out reports/scratch/dgx-comparison.json \
+  --html reports/scratch/dgx-comparison.html
 ```
 
 The HTML report includes summary cards, a sortable/filterable table, and simple

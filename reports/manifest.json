@@ -11,9 +11,8 @@
     "rows": 12,
     "duration_s": 10,
     "generated_from_commit": "0dcd73a",
-    "html": "curated/llama8b-precision-hardware.html",
     "json": "curated/llama8b-precision-hardware.json",
-    "command": "cargo run -- --study-models llama-8b-fp8,llama-8b-w4a8kv4 --study-gpus h100,h200,b200 --study-tps 1 --study-arrival-rates 1,5 --scheduler chunked-prefill --prompt-mean 512 --output-mean 128 --duration 10 --json-out reports/curated/llama8b-precision-hardware.json --html reports/curated/llama8b-precision-hardware.html"
+    "command": "cargo run -- --study-models llama-8b-fp8,llama-8b-w4a8kv4 --study-gpus h100,h200,b200 --study-tps 1 --study-arrival-rates 1,5 --scheduler chunked-prefill --prompt-mean 512 --output-mean 128 --duration 10 --json-out reports/curated/llama8b-precision-hardware.json"
   },
   {
     "id": "dgx-llama70b-comparison",
@@ -27,8 +26,7 @@
     "rows": 8,
     "duration_s": 10,
     "generated_from_commit": "0dcd73a",
-    "html": "curated/dgx-llama70b-comparison.html",
     "json": "curated/dgx-llama70b-comparison.json",
-    "command": "cargo run -- --study-models llama-70b-fp8,llama-70b-w4a8kv4 --study-systems dgx-h200,dgx-b200 --study-tps 8,16 --study-arrival-rates 1 --scheduler chunked-prefill --prompt-mean 1024 --output-mean 256 --duration 10 --json-out reports/curated/dgx-llama70b-comparison.json --html reports/curated/dgx-llama70b-comparison.html"
+    "command": "cargo run -- --study-models llama-70b-fp8,llama-70b-w4a8kv4 --study-systems dgx-h200,dgx-b200 --study-tps 8,16 --study-arrival-rates 1 --scheduler chunked-prefill --prompt-mean 1024 --output-mean 256 --duration 10 --json-out reports/curated/dgx-llama70b-comparison.json"
   }
 ]

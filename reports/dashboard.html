@@ -237,7 +237,6 @@
           ...row,
           _report_id: meta.id,
           _report_title: meta.title,
-          _report_html: meta.html,
           _system: systemForRow(row, meta),
           _precision: precision(row.model),
           _tags: meta.tags || [],
@@ -306,12 +305,12 @@
         const av = a[sortKey], bv = b[sortKey];
         return (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))) * sortDir;
       });
-      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}</th>`).join('') + '<th>Open</th></tr>';
+      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}</th>`).join('') + '</tr>';
       const body = sorted.map(r => `<tr>
         <td>${r._report_title}</td><td>${r._system}</td><td>${r.gpu}</td><td>${r.model}</td><td>${r._precision}</td>
         <td>${r.tp}</td><td>${r.pp}</td><td>${fmt(r.arrival_rate, 2)}</td><td>${r.completions}</td><td>${fmt(r.token_throughput, 0)}</td>
         <td>${fmt(r.ttft_p95_ms, 1)}</td><td>${fmt(r.tpot_p95_ms, 1)}</td><td>${fmt(r.cost_per_million_tokens_usd, 2)}</td>
-        <td>${fmt(r.energy_per_token_mj, 1)}</td><td>${fmt(r.kv_util_mean_pct, 1)}</td><td><a href="${r._report_html}">report</a></td>
+        <td>${fmt(r.energy_per_token_mj, 1)}</td><td>${fmt(r.kv_util_mean_pct, 1)}</td>
       </tr>`).join('');
       const table = document.getElementById('results');
       table.innerHTML = head + body;
