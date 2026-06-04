@@ -305,6 +305,7 @@
       if (model.includes('w4a8kv4')) return 'W4A8KV4';
       if (model.includes('w4a16')) return 'W4A16';
       if (model.includes('fp8')) return 'FP8';
+      if (['deepseek-v3', 'kimi-k2', 'llama4-maverick', 'llama4-behemoth'].includes(model)) return 'FP8';
       return 'BF16/FP16';
     }
     function systemForRow(row, meta) {
@@ -498,7 +499,8 @@
       const maxThroughput = Math.max(...rows.map(r => r.token_throughput || 0), 1);
       const cols = [
         ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
-        ['tp', 'TP'], ['arrival_rate', 'RPS'], ['token_throughput', 'Tok/s'], ['ttft_p95_ms', 'TTFT p95'],
+        ['tp', 'TP'], ['arrival_rate', 'RPS in'], ['throughput_rps', 'RPS done'], ['completions', 'Done'],
+        ['token_throughput', 'Output tok/s'], ['ttft_p95_ms', 'TTFT p95'],
         ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'], ['energy_per_token_mj', 'mJ/token']
       ];
       const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}${sortMark(k, compareSortKey, compareSortDir)}</th>`).join('') + '</tr>';
@@ -509,6 +511,8 @@
         <td>${r._precision}</td>
         <td>${r.tp}</td>
         <td>${fmt(r.arrival_rate, 2)}</td>
+        <td>${fmt(r.throughput_rps, 2)}</td>
+        <td>${r.completions}</td>
         <td class="bar-cell">${fmt(r.token_throughput, 0)}${metricBar(r.token_throughput, maxThroughput, false)}</td>
         <td>${fmt(r.ttft_p95_ms, 1)} ms</td>
         <td class="bar-cell">${fmt(r.tpot_p95_ms, 2)} ms${metricBar(r.tpot_p95_ms, maxTpot, true)}</td>
@@ -525,7 +529,7 @@
     function renderTable(data) {
       const cols = [
         ['_report_title', 'Report'], ['_system', 'System'], ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
-        ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Tok/s'],
+        ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Out tok/s'],
         ['ttft_p95_ms', 'TTFT p95'], ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'],
         ['energy_per_token_mj', 'mJ/token'], ['kv_util_mean_pct', 'KV %']
       ];
