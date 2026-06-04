@@ -314,6 +314,24 @@ impl GpuSpec {
                 mfu_prefill: 0.75,
                 mfu_decode: 0.80,
             }),
+            // NVIDIA Hopper H200 SXM — same Hopper tensor core generation as H100,
+            // upgraded to 141 GB HBM3e at 4.8 TB/s.
+            "h200" => Some(Self {
+                name: "H200-SXM5".into(),
+                flops_bf16: 989e12,
+                flops_fp8: 1978e12,
+                flops_fp4: 0.0,
+                supports_2to4_sparsity: true,
+                memory_bandwidth: 4.8e12,
+                memory_capacity: 141_000_000_000,
+                on_chip_sram: 50_000_000, // Hopper L2 class; HBM is the main difference vs H100
+                scale_up_bandwidth: 900e9,
+                scale_up_latency: 1e-6,  // NVLink 4 / NVSwitch hop ~1 µs
+                tdp_watts: 700.0,        // H200 SXM
+                cost_per_hour_usd: 4.50, // 2026 estimate: premium over H100, below B200
+                mfu_prefill: 0.75,
+                mfu_decode: 0.80,
+            }),
             "a100" => Some(Self {
                 name: "A100-80GB".into(),
                 flops_bf16: 312e12,

@@ -32,6 +32,7 @@ The simulator tracks `prefill_busy_secs` and `decode_busy_secs` per chip by hook
 | Accelerator | TDP | Source |
 |---|---:|---|
 | B200 SXM | 1000 W | NVIDIA |
+| H200 SXM | 700 W | NVIDIA |
 | H100 SXM5 | 700 W | NVIDIA |
 | A100 80GB SXM | 400 W | NVIDIA |
 | A10G | 300 W | NVIDIA |

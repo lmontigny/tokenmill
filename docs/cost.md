@@ -27,6 +27,7 @@ These are 2026 on-demand list prices, drawn from AWS / GCP / Lambda / Vultr / Ho
 | Preset | $/chip/hr | Source |
 |---|---:|---|
 | `b200` | 6.50 | AWS / Lambda preview pricing, limited availability |
+| `h200` | 4.50 | 2026 estimate; premium over H100, below B200 |
 | `h100` | 3.50 | AWS p5, GCP A3, Lambda |
 | `a100` | 2.50 | AWS p4, GCP A2 |
 | `a10g` | 1.20 | AWS g5.2xl |

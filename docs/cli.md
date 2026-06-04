@@ -4,7 +4,7 @@
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` \| `cerebras-cs3` |
+| `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` \| `cerebras-cs3` |
 | `--model` | `llama-70b` | Model preset: dense, MoE, FP8, W4A16, W4A8KV4, and sparse NVFP4 variants |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -66,6 +66,7 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | `rubin` | NVIDIA Rubin (2026) | 8750 | 17500 | 50000 sparse | 288 GB | 22 TB/s | 3.6 TB/s (NVLink 6) | 1500 W † |
 | `b200` | NVIDIA Blackwell | 2250 | 4500 | 9000 dense | 192 GB | 8 TB/s | 1.8 TB/s (NVLink 5) | 1000 W |
+| `h200` | NVIDIA Hopper HBM3e | 989 | 1978 | — | 141 GB | 4.8 TB/s | 900 GB/s (NVLink 4) | 700 W |
 | `h100` | NVIDIA Hopper | 989 | 1978 | — | 80 GB | 3.35 TB/s | 900 GB/s (NVLink 4) | 700 W |
 | `a100` | NVIDIA Ampere | 312 | — | — | 80 GB | 2 TB/s | 600 GB/s (NVLink 3) | 400 W |
 | `a10g` | NVIDIA Ampere | 125 | — | — | 24 GB | 600 GB/s | — | 300 W |

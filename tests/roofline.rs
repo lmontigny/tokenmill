@@ -211,6 +211,43 @@ fn b200_is_faster_than_h100_for_fp8() {
 }
 
 #[test]
+fn h200_has_h100_compute_with_larger_faster_hbm3e() {
+    let h100 = GpuSpec::preset("h100").unwrap();
+    let h200 = GpuSpec::preset("h200").unwrap();
+
+    assert_eq!(h200.flops_bf16, h100.flops_bf16);
+    assert_eq!(h200.flops_fp8, h100.flops_fp8);
+    assert_eq!(h200.memory_capacity, 141_000_000_000);
+    assert!((h200.memory_bandwidth - 4.8e12).abs() < 1e6);
+    assert!(h200.memory_capacity > h100.memory_capacity);
+    assert!(h200.memory_bandwidth > h100.memory_bandwidth);
+}
+
+#[test]
+fn h200_improves_memory_bound_decode_but_not_compute_bound_prefill() {
+    let h100 = GpuSpec::preset("h100").unwrap();
+    let h200 = GpuSpec::preset("h200").unwrap();
+    let model = LlmConfig::preset("llama-70b-fp8").unwrap();
+    let c = ClusterConfig::single_gpu();
+
+    let h100_decode = h100.decode_latency(1, 256, &model, None, &c);
+    let h200_decode = h200.decode_latency(1, 256, &model, None, &c);
+    let decode_speedup = h100_decode / h200_decode;
+    assert!(
+        close(decode_speedup, 4.8 / 3.35, 0.03),
+        "H200 decode should track HBM bandwidth, got {:.3}x",
+        decode_speedup
+    );
+
+    let h100_prefill = h100.prefill_latency(1, 512, &model, None, &c);
+    let h200_prefill = h200.prefill_latency(1, 512, &model, None, &c);
+    assert!(
+        close(h100_prefill, h200_prefill, 0.001),
+        "H200 and H100 prefill should match for same Hopper FP8 compute"
+    );
+}
+
+#[test]
 fn mi300x_beats_h100_on_decode_despite_lower_mfu() {
     // MI300X: 5.3 TB/s × 0.72 MFU = 3.82 TB/s effective. H100: 3.35 × 0.80 = 2.68. ~1.4× faster.
     let h100 = GpuSpec::preset("h100").unwrap();
