@@ -23,6 +23,10 @@ Current curated reports:
   compares DGX H100, H200, and B200 systems for Llama 70B FP8, W4A8KV4, and sparse NVFP4.
 - [`curated/b200-model-coverage.json`](curated/b200-model-coverage.json)
   runs every supported model preset on B200.
+- [`curated/frontier-moe-accelerator-coverage.json`](curated/frontier-moe-accelerator-coverage.json)
+  compares DeepSeek V3 and Kimi K2 variants across high-end accelerator presets.
+- [`curated/frontier-moe-dgx-coverage.json`](curated/frontier-moe-dgx-coverage.json)
+  compares DeepSeek V3 and Kimi K2 variants on DGX H100, H200, and B200 systems.
 - [`curated/groq-fit-examples.json`](curated/groq-fit-examples.json)
   shows Groq LPU v1 examples at high TP, where on-chip SRAM capacity drives chip count.
 
@@ -98,6 +102,34 @@ cargo run --release -- \
   --output-mean 256 \
   --duration 10 \
   --json-out reports/curated/b200-model-coverage.json
+```
+
+```bash
+cargo run --release -- \
+  --study-models deepseek-v3,kimi-k2,kimi-k2-nvfp4-sparse \
+  --study-gpus rubin,b200,h200,h100,mi355x,mi325x,mi300x,tpu-v8i,tpu-v8t,tpu-v7-ironwood,cerebras-cs3 \
+  --study-tps 8 \
+  --study-arrival-rates 1,3 \
+  --ep 8 \
+  --scheduler chunked-prefill \
+  --prompt-mean 2048 \
+  --output-mean 512 \
+  --duration 10 \
+  --json-out reports/curated/frontier-moe-accelerator-coverage.json
+```
+
+```bash
+cargo run --release -- \
+  --study-models deepseek-v3,kimi-k2,kimi-k2-nvfp4-sparse \
+  --study-systems dgx-h100,dgx-h200,dgx-b200 \
+  --study-tps 8,16 \
+  --study-arrival-rates 1,3 \
+  --ep 8 \
+  --scheduler chunked-prefill \
+  --prompt-mean 2048 \
+  --output-mean 512 \
+  --duration 10 \
+  --json-out reports/curated/frontier-moe-dgx-coverage.json
 ```
 
 ```bash
