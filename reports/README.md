@@ -6,6 +6,8 @@ Use this directory for generated study reports.
 
 - `curated/` — tracked, intentionally published reports with stable commands.
 - `scratch/` — local exploratory reports; ignored by Git except `.gitkeep`.
+- `manifest.json` — metadata used by the filterable report catalog.
+- `index.html` — GitHub Pages report catalog generated from the manifest data.
 
 Do not commit every experiment. HTML and JSON reports can get large and noisy.
 Commit only reports that are useful as project examples or recurring validation
@@ -49,7 +51,9 @@ cargo run -- \
 ```
 
 When adding a curated report, include the exact command in the commit message or
-PR description so the report can be regenerated.
+PR description so the report can be regenerated. Also add a `manifest.json`
+entry with title, description, models, hardware/systems, precision, tags, row
+count, report paths, and the regeneration command.
 
 ## Regenerating Current Reports
 
