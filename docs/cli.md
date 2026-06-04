@@ -25,6 +25,13 @@
 | `--kernel-table` | — | CSV file with profiled kernel latencies |
 | `--workload` | `synthetic` | `synthetic` or `trace:<path.csv>` (native or Azure format, auto-detected) |
 | `--output` | `text` | `text` \| `json` \| `csv` |
+| `--study-models` | — | Comma-separated model presets for matrix report mode |
+| `--study-gpus` | — | Comma-separated GPU presets for matrix report mode |
+| `--study-systems` | — | Comma-separated system presets for matrix report mode |
+| `--study-tps` | — | Comma-separated TP degrees for matrix report mode |
+| `--study-arrival-rates` | — | Comma-separated arrival rates for matrix report mode |
+| `--html` | — | Write a self-contained HTML study report |
+| `--json-out` | — | Write normalized JSON study results |
 | `--sweep-arrival-rates` | — | Comma-separated rates to sweep in parallel (e.g. `1,5,10,20`) |
 | `--kv-block-size` | `16` | Tokens per KV cache block |
 | `--kv-blocks` | `0` | KV cache blocks (0 = auto from GPU HBM) |

@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 
 use clap::Parser;
@@ -113,6 +114,34 @@ struct Args {
     /// Output format: text | json | csv
     #[arg(long, default_value = "text")]
     output: String,
+
+    /// Study mode: comma-separated model presets for matrix comparison
+    #[arg(long)]
+    study_models: Option<String>,
+
+    /// Study mode: comma-separated GPU presets for matrix comparison
+    #[arg(long)]
+    study_gpus: Option<String>,
+
+    /// Study mode: comma-separated system presets for matrix comparison
+    #[arg(long)]
+    study_systems: Option<String>,
+
+    /// Study mode: comma-separated TP degrees for matrix comparison
+    #[arg(long)]
+    study_tps: Option<String>,
+
+    /// Study mode: comma-separated arrival rates for matrix comparison
+    #[arg(long)]
+    study_arrival_rates: Option<String>,
+
+    /// Study mode: write self-contained HTML report to this path
+    #[arg(long)]
+    html: Option<String>,
+
+    /// Study mode: write normalized JSON results to this path
+    #[arg(long)]
+    json_out: Option<String>,
 
     /// Sweep over arrival rates (comma-separated, e.g. 1,5,10,20). Runs in parallel.
     #[arg(long)]
@@ -521,6 +550,381 @@ fn apply_system_preset(args: &mut Args) {
     }
 }
 
+fn split_csv(s: Option<&str>, fallback: &str) -> Vec<String> {
+    s.unwrap_or(fallback)
+        .split(',')
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn split_csv_f64(s: Option<&str>, fallback: f64) -> Vec<f64> {
+    match s {
+        Some(values) => values
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.parse::<f64>()
+                    .unwrap_or_else(|_| panic!("Invalid floating-point value '{}'", v))
+            })
+            .collect(),
+        None => vec![fallback],
+    }
+}
+
+fn split_csv_u32(s: Option<&str>, fallback: u32) -> Vec<u32> {
+    match s {
+        Some(values) => values
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| {
+                v.parse::<u32>()
+                    .unwrap_or_else(|_| panic!("Invalid integer value '{}'", v))
+            })
+            .collect(),
+        None => vec![fallback],
+    }
+}
+
+fn is_study_mode(args: &Args) -> bool {
+    args.study_models.is_some()
+        || args.study_gpus.is_some()
+        || args.study_systems.is_some()
+        || args.study_tps.is_some()
+        || args.study_arrival_rates.is_some()
+        || args.html.is_some()
+        || args.json_out.is_some()
+}
+
+fn run_study(args: &Args, kt: Option<&KernelTable>) -> Vec<RunSummary> {
+    let models = split_csv(args.study_models.as_deref(), &args.model);
+    let gpus = split_csv(args.study_gpus.as_deref(), &args.gpu);
+    let systems = split_csv(args.study_systems.as_deref(), "");
+    let tps = split_csv_u32(args.study_tps.as_deref(), args.tp);
+    let arrival_rates = split_csv_f64(args.study_arrival_rates.as_deref(), args.arrival_rate);
+
+    let mut configs = Vec::new();
+    for model in &models {
+        for tp in &tps {
+            for arrival_rate in &arrival_rates {
+                if systems.is_empty() {
+                    for gpu in &gpus {
+                        let mut c = args.clone();
+                        c.model = model.clone();
+                        c.gpu = gpu.clone();
+                        c.system = "none".into();
+                        c.tp = *tp;
+                        c.arrival_rate = *arrival_rate;
+                        configs.push((c, *arrival_rate));
+                    }
+                } else {
+                    for system in &systems {
+                        let mut c = args.clone();
+                        c.model = model.clone();
+                        c.system = system.clone();
+                        c.tp = *tp;
+                        c.arrival_rate = *arrival_rate;
+                        apply_system_preset(&mut c);
+                        configs.push((c, *arrival_rate));
+                    }
+                }
+            }
+        }
+    }
+
+    configs
+        .par_iter()
+        .map(|(config, arrival_rate)| run_once(config, *arrival_rate, kt))
+        .collect()
+}
+
+fn write_study_outputs(
+    args: &Args,
+    summaries: &[RunSummary],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(path) = &args.json_out {
+        write_report_file(path, &serde_json::to_string_pretty(summaries)?)?;
+    }
+    if let Some(path) = &args.html {
+        write_report_file(path, &render_html_report(args, summaries)?)?;
+    }
+    Ok(())
+}
+
+fn write_report_file(path: &str, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    fs::write(path, contents)?;
+    Ok(())
+}
+
+fn render_html_report(
+    args: &Args,
+    summaries: &[RunSummary],
+) -> Result<String, Box<dyn std::error::Error>> {
+    let data = serde_json::to_string_pretty(summaries)?;
+    let generated = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tokenmill study report</title>
+<style>
+:root {{
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --ink: #17202a;
+  --muted: #5d6b7a;
+  --line: #d9e0e8;
+  --accent: #0f766e;
+  --accent2: #2563eb;
+}}
+body {{
+  margin: 0;
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}}
+header {{
+  padding: 28px 32px 18px;
+  background: #0f172a;
+  color: white;
+}}
+h1 {{ margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }}
+h2 {{ margin: 0 0 14px; font-size: 18px; }}
+main {{ padding: 24px 32px 40px; }}
+.sub {{ color: #cbd5e1; }}
+.cards {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}}
+.card {{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}}
+.label {{ color: var(--muted); font-size: 12px; text-transform: uppercase; }}
+.value {{ font-size: 22px; font-weight: 700; margin-top: 4px; }}
+.small {{ color: var(--muted); margin-top: 3px; }}
+.controls {{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 18px;
+}}
+input, select {{
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: white;
+  min-width: 170px;
+}}
+section {{
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 18px;
+}}
+.charts {{
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}}
+svg {{ width: 100%; height: 260px; display: block; }}
+table {{ width: 100%; border-collapse: collapse; }}
+th, td {{ padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; }}
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) {{ text-align: left; }}
+th {{ color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }}
+td {{ white-space: nowrap; }}
+.table-wrap {{ overflow-x: auto; }}
+.note {{ color: var(--muted); }}
+</style>
+</head>
+<body>
+<header>
+  <h1>tokenmill study report</h1>
+  <div class="sub">{rows} runs · generated unix {generated}</div>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <section>
+    <h2>Filters</h2>
+    <div class="controls">
+      <input id="search" placeholder="Search model, GPU, scheduler">
+      <select id="modelFilter"><option value="">All models</option></select>
+      <select id="gpuFilter"><option value="">All GPUs</option></select>
+      <select id="precisionFilter"><option value="">All precision</option></select>
+    </div>
+  </section>
+  <section>
+    <h2>Charts</h2>
+    <div class="charts">
+      <div><div class="label">Cost vs TPOT p95</div><svg id="scatter"></svg></div>
+      <div><div class="label">Throughput by run</div><svg id="throughput"></svg></div>
+      <div><div class="label">Energy per token by run</div><svg id="energy"></svg></div>
+    </div>
+  </section>
+  <section>
+    <h2>Results</h2>
+    <div class="table-wrap">
+      <table id="results"></table>
+    </div>
+  </section>
+  <section>
+    <h2>Study Configuration</h2>
+    <p class="note">duration={duration}s, prompt_mean={prompt}, output_mean={output}, scheduler={scheduler}, latency model is reported per row.</p>
+  </section>
+</main>
+<script id="data" type="application/json">{data}</script>
+<script>
+const rows = JSON.parse(document.getElementById('data').textContent);
+let sortKey = 'cost_per_million_tokens_usd';
+let sortDir = 1;
+
+function precision(model) {{
+  if (model.includes('nvfp4')) return 'NVFP4 sparse';
+  if (model.includes('w4a8kv4')) return 'W4A8KV4';
+  if (model.includes('w4a16')) return 'W4A16';
+  if (model.includes('fp8')) return 'FP8';
+  return 'BF16/FP16';
+}}
+function fmt(v, d=1) {{
+  if (!Number.isFinite(v)) return '';
+  return Number(v).toLocaleString(undefined, {{ maximumFractionDigits: d, minimumFractionDigits: d }});
+}}
+function uniq(values) {{ return [...new Set(values)].sort(); }}
+function fillSelect(id, values) {{
+  const el = document.getElementById(id);
+  for (const v of values) {{
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v; el.appendChild(o);
+  }}
+}}
+fillSelect('modelFilter', uniq(rows.map(r => r.model)));
+fillSelect('gpuFilter', uniq(rows.map(r => r.gpu)));
+fillSelect('precisionFilter', uniq(rows.map(r => precision(r.model))));
+
+function filtered() {{
+  const q = document.getElementById('search').value.toLowerCase();
+  const m = document.getElementById('modelFilter').value;
+  const g = document.getElementById('gpuFilter').value;
+  const p = document.getElementById('precisionFilter').value;
+  return rows.filter(r =>
+    (!q || `${{r.model}} ${{r.gpu}} ${{r.scheduler}}`.toLowerCase().includes(q)) &&
+    (!m || r.model === m) &&
+    (!g || r.gpu === g) &&
+    (!p || precision(r.model) === p)
+  );
+}}
+function bestBy(data, key, lower=true) {{
+  const valid = data.filter(r => Number.isFinite(r[key]) && r[key] > 0);
+  valid.sort((a,b) => lower ? a[key] - b[key] : b[key] - a[key]);
+  return valid[0];
+}}
+function renderCards(data) {{
+  const cards = [
+    ['Cheapest', bestBy(data, 'cost_per_million_tokens_usd'), r => `$${{fmt(r.cost_per_million_tokens_usd, 2)}}/Mtok`],
+    ['Lowest TPOT p95', bestBy(data, 'tpot_p95_ms'), r => `${{fmt(r.tpot_p95_ms, 1)}} ms`],
+    ['Highest throughput', bestBy(data, 'token_throughput', false), r => `${{fmt(r.token_throughput, 0)}} tok/s`],
+    ['Lowest energy/token', bestBy(data, 'energy_per_token_mj'), r => `${{fmt(r.energy_per_token_mj, 1)}} mJ`],
+  ];
+  document.getElementById('cards').innerHTML = cards.map(([label, row, val]) => `
+    <div class="card"><div class="label">${{label}}</div>
+    <div class="value">${{row ? val(row) : 'n/a'}}</div>
+    <div class="small">${{row ? `${{row.model}} · ${{row.gpu}} · ${{row.scheduler}}` : ''}}</div></div>
+  `).join('');
+}}
+function renderTable(data) {{
+  const cols = [
+    ['model','Model'], ['gpu','GPU/System'], ['precision','Precision'], ['tp','TP'], ['pp','PP'],
+    ['arrival_rate','RPS in'], ['completions','Done'], ['token_throughput','Tok/s'],
+    ['ttft_p95_ms','TTFT p95 ms'], ['tpot_p95_ms','TPOT p95 ms'],
+    ['cost_per_million_tokens_usd','$/Mtok'], ['energy_per_token_mj','mJ/token'], ['kv_util_mean_pct','KV %']
+  ];
+  const sorted = [...data].sort((a,b) => {{
+    const av = sortKey === 'precision' ? precision(a.model) : a[sortKey];
+    const bv = sortKey === 'precision' ? precision(b.model) : b[sortKey];
+    return (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))) * sortDir;
+  }});
+  const head = '<tr>' + cols.map(([k,n]) => `<th data-k="${{k}}">${{n}}</th>`).join('') + '</tr>';
+  const body = sorted.map(r => `<tr>
+    <td>${{r.model}}</td><td>${{r.gpu}}</td><td>${{precision(r.model)}}</td>
+    <td>${{r.tp}}</td><td>${{r.pp}}</td><td>${{fmt(r.arrival_rate, 2)}}</td><td>${{r.completions}}</td>
+    <td>${{fmt(r.token_throughput, 0)}}</td><td>${{fmt(r.ttft_p95_ms, 1)}}</td><td>${{fmt(r.tpot_p95_ms, 1)}}</td>
+    <td>${{fmt(r.cost_per_million_tokens_usd, 2)}}</td><td>${{fmt(r.energy_per_token_mj, 1)}}</td><td>${{fmt(r.kv_util_mean_pct, 1)}}</td>
+  </tr>`).join('');
+  const table = document.getElementById('results');
+  table.innerHTML = head + body;
+  table.querySelectorAll('th').forEach(th => th.onclick = () => {{
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir *= -1; else {{ sortKey = k; sortDir = 1; }}
+    render();
+  }});
+}}
+function drawBars(id, data, key, color) {{
+  const svg = document.getElementById(id);
+  const w = svg.clientWidth || 420, h = 260, pad = 34;
+  const vals = data.map(r => r[key]).filter(v => Number.isFinite(v));
+  const max = Math.max(...vals, 1);
+  const barW = Math.max(3, (w - pad * 2) / Math.max(data.length, 1) - 3);
+  svg.innerHTML = data.map((r,i) => {{
+    const x = pad + i * ((w - pad * 2) / Math.max(data.length, 1));
+    const bh = (h - pad * 2) * ((r[key] || 0) / max);
+    const y = h - pad - bh;
+    return `<rect x="${{x}}" y="${{y}}" width="${{barW}}" height="${{bh}}" fill="${{color}}"><title>${{r.model}} · ${{r.gpu}}: ${{fmt(r[key], 2)}}</title></rect>`;
+  }}).join('') + `<line x1="${{pad}}" y1="${{h-pad}}" x2="${{w-pad}}" y2="${{h-pad}}" stroke="#94a3b8"/>`;
+}}
+function drawScatter(data) {{
+  const svg = document.getElementById('scatter');
+  const w = svg.clientWidth || 420, h = 260, pad = 36;
+  const valid = data.filter(r => r.cost_per_million_tokens_usd > 0 && r.tpot_p95_ms > 0);
+  const maxX = Math.max(...valid.map(r => r.tpot_p95_ms), 1);
+  const maxY = Math.max(...valid.map(r => r.cost_per_million_tokens_usd), 1);
+  svg.innerHTML = valid.map(r => {{
+    const x = pad + (w - pad * 2) * r.tpot_p95_ms / maxX;
+    const y = h - pad - (h - pad * 2) * r.cost_per_million_tokens_usd / maxY;
+    return `<circle cx="${{x}}" cy="${{y}}" r="5" fill="#0f766e"><title>${{r.model}} · ${{r.gpu}}: ${{fmt(r.tpot_p95_ms,1)}} ms, $${{fmt(r.cost_per_million_tokens_usd,2)}}/Mtok</title></circle>`;
+  }}).join('') + `<line x1="${{pad}}" y1="${{h-pad}}" x2="${{w-pad}}" y2="${{h-pad}}" stroke="#94a3b8"/><line x1="${{pad}}" y1="${{pad}}" x2="${{pad}}" y2="${{h-pad}}" stroke="#94a3b8"/>`;
+}}
+function render() {{
+  const data = filtered();
+  renderCards(data);
+  renderTable(data);
+  drawScatter(data);
+  drawBars('throughput', data, 'token_throughput', '#2563eb');
+  drawBars('energy', data, 'energy_per_token_mj', '#dc2626');
+}}
+['search','modelFilter','gpuFilter','precisionFilter'].forEach(id => document.getElementById(id).addEventListener('input', render));
+render();
+</script>
+</body>
+</html>"##,
+        rows = summaries.len(),
+        generated = generated,
+        data = data,
+        duration = args.duration,
+        prompt = args.prompt_mean,
+        output = args.output_mean,
+        scheduler = args.scheduler,
+    ))
+}
+
 fn fmt_with_commas(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
@@ -859,6 +1263,25 @@ fn main() {
     }
 
     let kt: Option<KernelTable> = args.kernel_table.as_deref().and_then(load_kernel_table);
+
+    if is_study_mode(&args) {
+        let summaries = run_study(&args, kt.as_ref());
+        if let Err(e) = write_study_outputs(&args, &summaries) {
+            eprintln!("Error writing study outputs: {e}");
+            std::process::exit(1);
+        }
+        if args.html.is_none() && args.json_out.is_none() {
+            println!("{}", serde_json::to_string_pretty(&summaries).unwrap());
+        } else {
+            if let Some(path) = &args.html {
+                eprintln!("Wrote HTML report to {path}");
+            }
+            if let Some(path) = &args.json_out {
+                eprintln!("Wrote JSON results to {path}");
+            }
+        }
+        return;
+    }
 
     // Print model card unless machine-readable output is requested.
     if args.output == "text" {

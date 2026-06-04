@@ -14,6 +14,7 @@ before you provision the GPUs.
 - **Latency prediction** — TTFT / TPOT histograms (p50 / p95 / p99), throughput, KV utilization, preemption counts
 - **Energy prediction** — per-chip TDP model, total kJ, mean kW, energy per output token
 - **Cost prediction** — GPU-hour pricing, total $, $ per million tokens, $ per request
+- **Reports** — matrix studies with JSON data and self-contained HTML comparisons
 
 Targets ~10% error vs real GPU kernel time on validated configs (see [docs/validation.md](docs/validation.md)).
 Collective formulas model one scale-up domain by default and can add a scale-out
