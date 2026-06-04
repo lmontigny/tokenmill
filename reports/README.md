@@ -25,6 +25,10 @@ Current curated reports:
   runs every supported model preset on B200.
 - [`curated/frontier-moe-accelerator-coverage.json`](curated/frontier-moe-accelerator-coverage.json)
   compares DeepSeek V3 and Kimi K2 variants across high-end accelerator presets.
+  Cerebras is omitted from this frontier-MoE dataset because DeepSeek/Kimi do
+  not fit on one 44 GB CS-3 system; multi-CS-3 TP is dominated by external
+  system I/O in the generic GPU-style model and needs Cerebras-specific
+  calibration before publication.
 - [`curated/frontier-moe-dgx-coverage.json`](curated/frontier-moe-dgx-coverage.json)
   compares DeepSeek V3 and Kimi K2 variants on DGX H100, H200, and B200 systems.
 - [`curated/groq-fit-examples.json`](curated/groq-fit-examples.json)
@@ -107,7 +111,7 @@ cargo run --release -- \
 ```bash
 cargo run --release -- \
   --study-models deepseek-v3,kimi-k2,kimi-k2-nvfp4-sparse \
-  --study-gpus rubin,b200,h200,h100,mi355x,mi325x,mi300x,tpu-v8i,tpu-v8t,tpu-v7-ironwood,cerebras-cs3 \
+  --study-gpus rubin,b200,h200,h100,mi355x,mi325x,mi300x,tpu-v8i,tpu-v8t,tpu-v7-ironwood \
   --study-tps 8 \
   --study-arrival-rates 1,3 \
   --ep 8 \
