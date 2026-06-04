@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tokenmill dashboard</title>
+  <style>
+    :root {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --ink: #17202a;
+      --muted: #5f6f80;
+      --line: #d8e0ea;
+      --accent: #0f766e;
+      --blue: #2563eb;
+      --red: #dc2626;
+      --amber: #b45309;
+    }
+    body {
+      margin: 0;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      background: #0f172a;
+      color: white;
+      padding: 28px 30px 20px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+    main {
+      padding: 22px 30px 44px;
+    }
+    .sub {
+      color: #cbd5e1;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: minmax(220px, 2fr) repeat(6, minmax(130px, 1fr));
+      gap: 10px;
+    }
+    input, select {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: white;
+      min-width: 0;
+    }
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    .value {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    .small {
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 14px;
+    }
+    svg {
+      width: 100%;
+      height: 270px;
+      display: block;
+    }
+    .table-wrap {
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap;
+      text-align: right;
+    }
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    th:first-child, td:first-child,
+    th:nth-child(2), td:nth-child(2),
+    th:nth-child(3), td:nth-child(3),
+    th:nth-child(4), td:nth-child(4),
+    th:nth-child(5), td:nth-child(5) {
+      text-align: left;
+    }
+    .status {
+      color: var(--muted);
+      margin-top: 10px;
+    }
+    .error {
+      color: var(--red);
+    }
+    a {
+      color: var(--accent);
+      font-weight: 650;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 980px) {
+      .filters {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+    @media (max-width: 620px) {
+      main { padding: 18px; }
+      .filters { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>tokenmill dashboard</h1>
+    <div class="sub">One-page view across all curated simulation results: systems, GPUs, models, precision, latency, cost, and energy.</div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Filters</h2>
+      <div class="filters">
+        <input id="search" placeholder="Search model, GPU, system, report">
+        <select id="system"><option value="">All systems</option></select>
+        <select id="gpu"><option value="">All GPUs</option></select>
+        <select id="model"><option value="">All models</option></select>
+        <select id="precision"><option value="">All precision</option></select>
+        <select id="tp"><option value="">All TP</option></select>
+        <select id="report"><option value="">All reports</option></select>
+      </div>
+      <div class="status" id="status">Loading curated datasets...</div>
+    </section>
+    <div class="cards" id="cards"></div>
+    <section class="panel">
+      <h2>Charts</h2>
+      <div class="charts">
+        <div><div class="label">Cost vs TPOT p95</div><svg id="scatter"></svg></div>
+        <div><div class="label">Throughput by configuration</div><svg id="throughput"></svg></div>
+        <div><div class="label">Energy per token by configuration</div><svg id="energy"></svg></div>
+        <div><div class="label">TPOT p95 by configuration</div><svg id="tpot"></svg></div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2>All Results</h2>
+      <div class="table-wrap">
+        <table id="results"></table>
+      </div>
+    </section>
+  </main>
+  <script>
+    let rows = [];
+    let sortKey = 'cost_per_million_tokens_usd';
+    let sortDir = 1;
+
+    const reportMeta = new Map();
+
+    function precision(model) {
+      if (model.includes('nvfp4')) return 'NVFP4 sparse';
+      if (model.includes('w4a8kv4')) return 'W4A8KV4';
+      if (model.includes('w4a16')) return 'W4A16';
+      if (model.includes('fp8')) return 'FP8';
+      return 'BF16/FP16';
+    }
+    function systemForRow(row, meta) {
+      if (!meta.systems || meta.systems.length === 0) return 'standalone';
+      const gpu = row.gpu.toLowerCase();
+      if (gpu.includes('h200') && meta.systems.includes('dgx-h200')) return 'dgx-h200';
+      if (gpu.includes('b200') && meta.systems.includes('dgx-b200')) return 'dgx-b200';
+      if (gpu.includes('h100') && meta.systems.includes('dgx-h100')) return 'dgx-h100';
+      return meta.systems.join(',');
+    }
+    function fmt(v, d = 1) {
+      if (!Number.isFinite(v)) return '';
+      return Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+    }
+    function uniq(values) {
+      return [...new Set(values.filter(v => v !== undefined && v !== null && v !== ''))].sort((a, b) => String(a).localeCompare(String(b)));
+    }
+    function addOptions(id, values) {
+      const el = document.getElementById(id);
+      for (const v of values) {
+        const option = document.createElement('option');
+        option.value = v;
+        option.textContent = v;
+        el.appendChild(option);
+      }
+    }
+    async function loadData() {
+      const manifest = await fetch('manifest.json').then(r => {
+        if (!r.ok) throw new Error(`Failed to load manifest: ${r.status}`);
+        return r.json();
+      });
+      for (const meta of manifest) {
+        reportMeta.set(meta.id, meta);
+        const data = await fetch(meta.json).then(r => {
+          if (!r.ok) throw new Error(`Failed to load ${meta.json}: ${r.status}`);
+          return r.json();
+        });
+        rows.push(...data.map(row => ({
+          ...row,
+          _report_id: meta.id,
+          _report_title: meta.title,
+          _report_html: meta.html,
+          _system: systemForRow(row, meta),
+          _precision: precision(row.model),
+          _tags: meta.tags || [],
+        })));
+      }
+      setupFilters();
+      render();
+    }
+    function setupFilters() {
+      addOptions('system', uniq(rows.map(r => r._system)));
+      addOptions('gpu', uniq(rows.map(r => r.gpu)));
+      addOptions('model', uniq(rows.map(r => r.model)));
+      addOptions('precision', uniq(rows.map(r => r._precision)));
+      addOptions('tp', uniq(rows.map(r => String(r.tp))).sort((a, b) => Number(a) - Number(b)));
+      addOptions('report', uniq(rows.map(r => r._report_title)));
+      ['search', 'system', 'gpu', 'model', 'precision', 'tp', 'report'].forEach(id => {
+        document.getElementById(id).addEventListener('input', render);
+      });
+    }
+    function filtered() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const system = document.getElementById('system').value;
+      const gpu = document.getElementById('gpu').value;
+      const model = document.getElementById('model').value;
+      const precisionFilter = document.getElementById('precision').value;
+      const tp = document.getElementById('tp').value;
+      const report = document.getElementById('report').value;
+      return rows.filter(r => {
+        const haystack = [
+          r.model, r.gpu, r.scheduler, r._system, r._precision, r._report_title, ...r._tags
+        ].join(' ').toLowerCase();
+        return (!q || haystack.includes(q)) &&
+          (!system || r._system === system) &&
+          (!gpu || r.gpu === gpu) &&
+          (!model || r.model === model) &&
+          (!precisionFilter || r._precision === precisionFilter) &&
+          (!tp || String(r.tp) === tp) &&
+          (!report || r._report_title === report);
+      });
+    }
+    function bestBy(data, key, lower = true) {
+      const valid = data.filter(r => Number.isFinite(r[key]) && r[key] > 0);
+      valid.sort((a, b) => lower ? a[key] - b[key] : b[key] - a[key]);
+      return valid[0];
+    }
+    function card(label, row, value) {
+      return `<div class="card"><div class="label">${label}</div><div class="value">${row ? value(row) : 'n/a'}</div><div class="small">${row ? `${row.model} · ${row._system} · ${row.gpu}` : ''}</div></div>`;
+    }
+    function renderCards(data) {
+      const cards = [
+        card('Cheapest', bestBy(data, 'cost_per_million_tokens_usd'), r => `$${fmt(r.cost_per_million_tokens_usd, 2)}/Mtok`),
+        card('Lowest TPOT p95', bestBy(data, 'tpot_p95_ms'), r => `${fmt(r.tpot_p95_ms, 1)} ms`),
+        card('Highest throughput', bestBy(data, 'token_throughput', false), r => `${fmt(r.token_throughput, 0)} tok/s`),
+        card('Lowest energy/token', bestBy(data, 'energy_per_token_mj'), r => `${fmt(r.energy_per_token_mj, 1)} mJ`),
+      ];
+      document.getElementById('cards').innerHTML = cards.join('');
+    }
+    function renderTable(data) {
+      const cols = [
+        ['_report_title', 'Report'], ['_system', 'System'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
+        ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Tok/s'],
+        ['ttft_p95_ms', 'TTFT p95'], ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'],
+        ['energy_per_token_mj', 'mJ/token'], ['kv_util_mean_pct', 'KV %']
+      ];
+      const sorted = [...data].sort((a, b) => {
+        const av = a[sortKey], bv = b[sortKey];
+        return (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))) * sortDir;
+      });
+      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}</th>`).join('') + '<th>Open</th></tr>';
+      const body = sorted.map(r => `<tr>
+        <td>${r._report_title}</td><td>${r._system}</td><td>${r.gpu}</td><td>${r.model}</td><td>${r._precision}</td>
+        <td>${r.tp}</td><td>${r.pp}</td><td>${fmt(r.arrival_rate, 2)}</td><td>${r.completions}</td><td>${fmt(r.token_throughput, 0)}</td>
+        <td>${fmt(r.ttft_p95_ms, 1)}</td><td>${fmt(r.tpot_p95_ms, 1)}</td><td>${fmt(r.cost_per_million_tokens_usd, 2)}</td>
+        <td>${fmt(r.energy_per_token_mj, 1)}</td><td>${fmt(r.kv_util_mean_pct, 1)}</td><td><a href="${r._report_html}">report</a></td>
+      </tr>`).join('');
+      const table = document.getElementById('results');
+      table.innerHTML = head + body;
+      table.querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
+        const k = th.dataset.k;
+        if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = 1; }
+        render();
+      });
+    }
+    function drawBars(id, data, key, color) {
+      const svg = document.getElementById(id);
+      const w = svg.clientWidth || 420, h = 270, pad = 34;
+      const vals = data.map(r => r[key]).filter(Number.isFinite);
+      const max = Math.max(...vals, 1);
+      const slot = (w - pad * 2) / Math.max(data.length, 1);
+      const barW = Math.max(3, slot - 3);
+      svg.innerHTML = data.map((r, i) => {
+        const x = pad + i * slot;
+        const bh = (h - pad * 2) * ((r[key] || 0) / max);
+        const y = h - pad - bh;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${color}"><title>${r.model} · ${r._system} · ${r.gpu}: ${fmt(r[key], 2)}</title></rect>`;
+      }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+    }
+    function drawScatter(data) {
+      const svg = document.getElementById('scatter');
+      const w = svg.clientWidth || 420, h = 270, pad = 38;
+      const valid = data.filter(r => r.cost_per_million_tokens_usd > 0 && r.tpot_p95_ms > 0);
+      const maxX = Math.max(...valid.map(r => r.tpot_p95_ms), 1);
+      const maxY = Math.max(...valid.map(r => r.cost_per_million_tokens_usd), 1);
+      svg.innerHTML = valid.map(r => {
+        const x = pad + (w - pad * 2) * r.tpot_p95_ms / maxX;
+        const y = h - pad - (h - pad * 2) * r.cost_per_million_tokens_usd / maxY;
+        return `<circle cx="${x}" cy="${y}" r="5" fill="#0f766e"><title>${r.model} · ${r._system} · ${r.gpu}: ${fmt(r.tpot_p95_ms,1)} ms, $${fmt(r.cost_per_million_tokens_usd,2)}/Mtok</title></circle>`;
+      }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+    }
+    function render() {
+      const data = filtered();
+      document.getElementById('status').textContent = `${data.length} of ${rows.length} rows shown`;
+      renderCards(data);
+      renderTable(data);
+      drawScatter(data);
+      drawBars('throughput', data, 'token_throughput', '#2563eb');
+      drawBars('energy', data, 'energy_per_token_mj', '#dc2626');
+      drawBars('tpot', data, 'tpot_p95_ms', '#b45309');
+    }
+    loadData().catch(err => {
+      document.getElementById('status').innerHTML = `<span class="error">${err.message}</span>`;
+    });
+  </script>
+</body>
+</html>
