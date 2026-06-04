@@ -264,11 +264,11 @@
     </section>
     <section class="panel">
       <h2>Charts</h2>
-      <div class="note">Throughput is achieved output throughput for the configured arrival stream. At low load, fast hardware can tie because it completes the same requests; use TPOT, TTFT, cost, and energy to compare latency/cost, or add higher arrival-rate datasets for saturation capacity.</div>
+      <div class="note">Decode rate is derived from TPOT p95 as 1000 / TPOT p95. Workload output tokens/sec is traffic-limited at low RPS and is kept in the raw table, not used as the main hardware capacity signal.</div>
       <div class="legend" id="legend"></div>
       <div class="charts">
         <div class="chart"><div class="chart-head"><div class="label">Cost vs TPOT p95</div></div><svg id="scatter"></svg></div>
-        <div class="chart"><div class="chart-head"><div class="label">Achieved output throughput by configuration</div></div><svg id="throughput"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">Decode rate by configuration</div></div><svg id="throughput"></svg></div>
         <div class="chart"><div class="chart-head"><div class="label">Energy per token by configuration</div></div><svg id="energy"></svg></div>
         <div class="chart"><div class="chart-head"><div class="label">TPOT p95 by configuration</div></div><svg id="tpot"></svg></div>
       </div>
@@ -378,6 +378,8 @@
           _system: systemForRow(row, meta),
           _hardware: hardwarePresetForRow(row, meta),
           _precision: precision(row.model),
+          _decode_rate_p95: row.tpot_p95_ms > 0 ? 1000.0 / row.tpot_p95_ms : 0,
+          _load_result: row.throughput_rps >= row.arrival_rate * 0.95 ? 'traffic-capped' : 'backlog',
           _tags: meta.tags || [],
         })));
       }
@@ -432,7 +434,7 @@
       const cards = [
         card('Cheapest', bestBy(data, 'cost_per_million_tokens_usd'), r => `$${fmt(r.cost_per_million_tokens_usd, 2)}/Mtok`),
         card('Lowest TPOT p95', bestBy(data, 'tpot_p95_ms'), r => `${fmt(r.tpot_p95_ms, 1)} ms`),
-        card('Highest achieved throughput', bestBy(data, 'token_throughput', false), r => `${fmt(r.token_throughput, 0)} tok/s`),
+        card('Fastest p95 decode', bestBy(data, '_decode_rate_p95', false), r => `${fmt(r._decode_rate_p95, 0)} tok/s/req`),
         card('Lowest energy/token', bestBy(data, 'energy_per_token_mj'), r => `${fmt(r.energy_per_token_mj, 1)} mJ`),
       ];
       document.getElementById('cards').innerHTML = cards.join('');
@@ -496,11 +498,11 @@
       const maxTpot = Math.max(...rows.map(r => r.tpot_p95_ms || 0), 1);
       const maxCost = Math.max(...rows.map(r => r.cost_per_million_tokens_usd || 0), 1);
       const maxEnergy = Math.max(...rows.map(r => r.energy_per_token_mj || 0), 1);
-      const maxThroughput = Math.max(...rows.map(r => r.token_throughput || 0), 1);
+      const maxDecodeRate = Math.max(...rows.map(r => r._decode_rate_p95 || 0), 1);
       const cols = [
         ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
         ['tp', 'TP'], ['arrival_rate', 'RPS in'], ['throughput_rps', 'RPS done'], ['completions', 'Done'],
-        ['token_throughput', 'Output tok/s'], ['ttft_p95_ms', 'TTFT p95'],
+        ['_load_result', 'Load'], ['_decode_rate_p95', 'p95 decode tok/s/req'], ['ttft_p95_ms', 'TTFT p95'],
         ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'], ['energy_per_token_mj', 'mJ/token']
       ];
       const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}${sortMark(k, compareSortKey, compareSortDir)}</th>`).join('') + '</tr>';
@@ -513,7 +515,8 @@
         <td>${fmt(r.arrival_rate, 2)}</td>
         <td>${fmt(r.throughput_rps, 2)}</td>
         <td>${r.completions}</td>
-        <td class="bar-cell">${fmt(r.token_throughput, 0)}${metricBar(r.token_throughput, maxThroughput, false)}</td>
+        <td>${r._load_result}</td>
+        <td class="bar-cell">${fmt(r._decode_rate_p95, 0)}${metricBar(r._decode_rate_p95, maxDecodeRate, false)}</td>
         <td>${fmt(r.ttft_p95_ms, 1)} ms</td>
         <td class="bar-cell">${fmt(r.tpot_p95_ms, 2)} ms${metricBar(r.tpot_p95_ms, maxTpot, true)}</td>
         <td class="bar-cell">$${fmt(r.cost_per_million_tokens_usd, 2)}${metricBar(r.cost_per_million_tokens_usd, maxCost, true)}</td>
@@ -529,7 +532,7 @@
     function renderTable(data) {
       const cols = [
         ['_report_title', 'Report'], ['_system', 'System'], ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
-        ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Out tok/s'],
+        ['tp', 'TP'], ['pp', 'PP'], ['arrival_rate', 'RPS in'], ['completions', 'Done'], ['token_throughput', 'Workload out tok/s'],
         ['ttft_p95_ms', 'TTFT p95'], ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'],
         ['energy_per_token_mj', 'mJ/token'], ['kv_util_mean_pct', 'KV %']
       ];
@@ -619,7 +622,7 @@
       renderLegend(data);
       renderTable(data);
       drawScatter(data);
-      drawBars('throughput', data, 'token_throughput', 'Achieved output throughput (tokens/s)', false);
+      drawBars('throughput', data, '_decode_rate_p95', 'p95 decode rate (tokens/s/request)', false);
       drawBars('energy', data, 'energy_per_token_mj', 'Energy (mJ/token)', true);
       drawBars('tpot', data, 'tpot_p95_ms', 'TPOT p95 (ms)', true);
     }
