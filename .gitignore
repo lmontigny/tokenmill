@@ -1,3 +1,5 @@
 /target
 /data/traces/
 /.idea/
+/reports/scratch/*
+!/reports/scratch/.gitkeep
