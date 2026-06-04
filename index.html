@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>tokenmill reports</title>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --ink: #17202a;
+      --muted: #5f6f80;
+      --panel: #ffffff;
+      --line: #d8e0ea;
+      --accent: #0f766e;
+    }
+    body {
+      margin: 0;
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    header {
+      background: #0f172a;
+      color: white;
+      padding: 34px 28px 26px;
+    }
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 26px 22px 42px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 18px;
+    }
+    .sub {
+      color: #cbd5e1;
+      max-width: 760px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+      margin-top: 18px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+    .card p {
+      color: var(--muted);
+      margin: 0 0 14px;
+    }
+    a {
+      color: var(--accent);
+      font-weight: 650;
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    .links {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .meta {
+      color: var(--muted);
+      margin-top: 22px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>tokenmill</h1>
+    <div class="sub">LLM inference simulation reports for hardware, precision, cost, latency, and energy comparisons.</div>
+  </header>
+  <main>
+    <h2>Curated Reports</h2>
+    <div class="grid">
+      <section class="card">
+        <h2>Llama 8B Precision And Hardware</h2>
+        <p>Compares Llama 8B FP8 vs W4A8KV4 across H100, H200, and B200 at 1 and 5 rps.</p>
+        <div class="links">
+          <a href="reports/curated/llama8b-precision-hardware.html">Open HTML report</a>
+          <a href="reports/curated/llama8b-precision-hardware.json">View JSON data</a>
+        </div>
+      </section>
+      <section class="card">
+        <h2>DGX Llama 70B Comparison</h2>
+        <p>Compares DGX H200 vs DGX B200 for Llama 70B FP8 and W4A8KV4 at TP=8 and TP=16.</p>
+        <div class="links">
+          <a href="reports/curated/dgx-llama70b-comparison.html">Open HTML report</a>
+          <a href="reports/curated/dgx-llama70b-comparison.json">View JSON data</a>
+        </div>
+      </section>
+    </div>
+    <p class="meta">
+      Report generation commands live in <a href="reports/">reports/</a>.
+      Source code and documentation are in the GitHub repository.
+    </p>
+  </main>
+</body>
+</html>
