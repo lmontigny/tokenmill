@@ -78,6 +78,18 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     ep: u32,
 
+    /// Accelerators per scale-up node/server before traffic crosses scale-out networking
+    #[arg(long, default_value_t = 8)]
+    gpus_per_node: u32,
+
+    /// Scale-out network bandwidth for cross-node TP/PP/EP collectives (GB/s). 0 = legacy uniform scale-up model.
+    #[arg(long, default_value_t = 0.0)]
+    scale_out_bw_gbps: f64,
+
+    /// One-way scale-out network latency for cross-node TP/PP/EP collectives (microseconds)
+    #[arg(long, default_value_t = 5.0)]
+    scale_out_latency_us: f64,
+
     /// Disaggregate prefill and decode onto separate GPUs
     #[arg(long)]
     disaggregate: bool,
@@ -400,6 +412,12 @@ fn build_cluster_desc(args: &Args, gpu: &GpuSpec) -> String {
     if args.ep > 1 {
         parts.push(format!("EP={}", args.ep));
     }
+    if args.scale_out_bw_gbps > 0.0 {
+        parts.push(format!(
+            "{} GPU/node, scale-out {:.0} GB/s",
+            args.gpus_per_node, args.scale_out_bw_gbps
+        ));
+    }
     if args.disaggregate {
         parts.push("disaggregated P/D".to_string());
     }
@@ -449,6 +467,9 @@ fn run_once(args: &Args, arrival_rate: f64, kt: Option<&KernelTable>) -> RunSumm
         ep: args.ep,
         scale_up_bw: gpu_spec.scale_up_bandwidth,
         scale_up_latency: gpu_spec.scale_up_latency,
+        gpus_per_node: args.gpus_per_node,
+        scale_out_bw: args.scale_out_bw_gbps * 1e9,
+        scale_out_latency: args.scale_out_latency_us * 1e-6,
         internode_bw: args.internode_bw_gbps * 1e9,
         disaggregate: args.disaggregate,
     };

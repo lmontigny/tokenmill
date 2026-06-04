@@ -15,6 +15,9 @@
 | `--tp` | `1` | Tensor parallelism degree |
 | `--pp` | `1` | Pipeline parallelism degree |
 | `--ep` | `1` | Expert parallelism degree (MoE models) |
+| `--gpus-per-node` | `8` | Accelerators in one scale-up node before TP/PP/EP crosses scale-out networking |
+| `--scale-out-bw-gbps` | `0` | Scale-out bandwidth for cross-node TP/PP/EP collectives in GB/s; `0` keeps legacy uniform scale-up behavior |
+| `--scale-out-latency-us` | `5` | One-way scale-out latency for cross-node TP/PP/EP collectives |
 | `--disaggregate` | off | Separate prefill and decode GPUs; KV transferred over network |
 | `--internode-bw-gbps` | `200` | Network bandwidth for KV transfer (GB/s) |
 | `--kernel-table` | — | CSV file with profiled kernel latencies |

@@ -142,6 +142,27 @@ fn ep_all_to_all_scales_with_token_count() {
 }
 
 #[test]
+fn ep_all_to_all_uses_scale_out_when_experts_cross_nodes() {
+    let mut local = ClusterConfig::single_gpu();
+    local.scale_up_bw = 900e9;
+    local.scale_up_latency = 1e-6;
+    local.ep = 16;
+
+    let mut scale_out = local.clone();
+    scale_out.gpus_per_node = 8;
+    scale_out.scale_out_bw = 50e9;
+    scale_out.scale_out_latency = 5e-6;
+
+    let local_ms = local.ep_all_to_all_latency(4096, 4096, 2) * 1000.0;
+    let scale_out_ms = scale_out.ep_all_to_all_latency(4096, 4096, 2) * 1000.0;
+
+    assert!(
+        scale_out_ms > local_ms,
+        "cross-node EP all-to-all should be slower ({scale_out_ms:.3} ms vs {local_ms:.3} ms)"
+    );
+}
+
+#[test]
 fn expert_weight_bytes_active_is_subset_of_total_active() {
     // Active expert bytes must not exceed total active bytes.
     for name in &["mixtral-8x7b", "llama4-maverick", "deepseek-v3"] {

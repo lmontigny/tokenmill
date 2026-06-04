@@ -457,3 +457,45 @@ fn all_reduce_scales_with_message_size() {
         big / small
     );
 }
+
+#[test]
+fn scale_out_all_reduce_is_slower_than_single_node_scale_up() {
+    let mut local = ClusterConfig::single_gpu();
+    local.tp = 16;
+    local.scale_up_bw = 900e9;
+    local.scale_up_latency = 1e-6;
+
+    let mut scale_out = local.clone();
+    scale_out.gpus_per_node = 8;
+    scale_out.scale_out_bw = 50e9;
+    scale_out.scale_out_latency = 5e-6;
+
+    let local_ms = local.all_reduce_latency(64_000_000) * 1000.0;
+    let scale_out_ms = scale_out.all_reduce_latency(64_000_000) * 1000.0;
+
+    assert!(
+        scale_out_ms > local_ms,
+        "cross-node all-reduce should be slower ({scale_out_ms:.3} ms vs {local_ms:.3} ms)"
+    );
+}
+
+#[test]
+fn pipeline_transfer_uses_scale_out_for_cross_node_boundary() {
+    let mut local = ClusterConfig::single_gpu();
+    local.pp = 16;
+    local.scale_up_bw = 900e9;
+    local.scale_up_latency = 1e-6;
+
+    let mut scale_out = local.clone();
+    scale_out.gpus_per_node = 8;
+    scale_out.scale_out_bw = 50e9;
+    scale_out.scale_out_latency = 5e-6;
+
+    let local_ms = local.pp_transfer_latency(32_000_000, true) * 1000.0;
+    let scale_out_ms = scale_out.pp_transfer_latency(32_000_000, true) * 1000.0;
+
+    assert!(
+        scale_out_ms > local_ms,
+        "cross-node PP boundary should raise average transfer cost ({scale_out_ms:.3} ms vs {local_ms:.3} ms)"
+    );
+}

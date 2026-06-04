@@ -12,9 +12,10 @@
 ///     in flight (pipeline fill), which the DES models naturally via event timing.
 ///   - Inter-stage transfer cost = α + activation_bytes / β.
 ///
-/// EP (expert parallelism): MoE experts sharded across ep_degree GPUs within a single
-/// scale-up domain (NVLink switch, Infinity Fabric, TPU ICI, …). No cross-node DCN modelled.
-///   - Each GPU holds n_experts/ep experts; tokens are dispatched via the scale-up fabric.
+/// EP (expert parallelism): MoE experts sharded across ep_degree GPUs. When
+/// `scale_out_bw` is set and EP exceeds `gpus_per_node`, cross-node expert
+/// traffic uses the scale-out network rather than the scale-up fabric.
+///   - Each GPU holds n_experts/ep experts; tokens are dispatched over scale-up or scale-out.
 ///   - Two all-to-alls per MoE layer: dispatch (send top_K token activations out) + combine (gather).
 ///   - All-to-all data per GPU per direction ≈ (ep-1)/ep × (top_K × batch / ep) × d_model × activation_bytes.
 ///   - Fully-connected fabrics (NVSwitch, OCS) give full bisection BW; ring/torus fabrics
@@ -32,6 +33,14 @@ pub struct ClusterConfig {
     /// Dominates collective cost for small messages and very large TP (e.g. Groq at TP=358).
     /// 0 = pure bandwidth model (the old behaviour).
     pub scale_up_latency: f64,
+    /// Number of accelerators in one scale-up node/server. Parallel groups larger than this
+    /// cross the scale-out network when `scale_out_bw` is configured.
+    pub gpus_per_node: u32,
+    /// Scale-out network bandwidth in bytes/sec (InfiniBand, RoCE, Ethernet). 0 keeps the
+    /// legacy uniform scale-up model for all collectives.
+    pub scale_out_bw: f64,
+    /// One-way scale-out network latency in seconds.
+    pub scale_out_latency: f64,
     /// Cross-node bandwidth in bytes/sec (PP inter-server and KV transfer in disaggregated PD).
     pub internode_bw: f64,
     /// If true, prefill and decode run on separate GPU pools connected over internode_bw.
@@ -46,9 +55,26 @@ impl ClusterConfig {
             ep: 1,
             scale_up_bw: 0.0,
             scale_up_latency: 0.0,
+            gpus_per_node: 8,
+            scale_out_bw: 0.0,
+            scale_out_latency: 0.0,
             internode_bw: 0.0,
             disaggregate: false,
         }
+    }
+
+    fn ring_latency(n: u32, msg_bytes: u64, bw: f64, latency: f64) -> f64 {
+        if n <= 1 || bw <= 0.0 {
+            return 0.0;
+        }
+        let n = n as f64;
+        let hops = 2.0 * (n - 1.0);
+        let chunk = msg_bytes as f64 / n;
+        hops * (latency + chunk / bw)
+    }
+
+    fn spans_scale_out(&self, degree: u32) -> bool {
+        self.scale_out_bw > 0.0 && degree > self.gpus_per_node.max(1)
     }
 
     /// KV transfer latency from prefill node to decode node (seconds).
@@ -65,10 +91,18 @@ impl ClusterConfig {
         if self.tp <= 1 || self.scale_up_bw <= 0.0 {
             return 0.0;
         }
-        let n = self.tp as f64;
-        let hops = 2.0 * (n - 1.0);
-        let chunk = msg_bytes as f64 / n;
-        hops * (self.scale_up_latency + chunk / self.scale_up_bw)
+
+        if !self.spans_scale_out(self.tp) {
+            return Self::ring_latency(self.tp, msg_bytes, self.scale_up_bw, self.scale_up_latency);
+        }
+
+        // Hierarchical approximation: reduce within each node, all-reduce across nodes,
+        // then broadcast within each node. This captures the large Ethernet/IB penalty
+        // without requiring a full topology graph.
+        let local = self.gpus_per_node.max(1).min(self.tp);
+        let nodes = self.tp.div_ceil(self.gpus_per_node.max(1));
+        2.0 * Self::ring_latency(local, msg_bytes, self.scale_up_bw, self.scale_up_latency)
+            + Self::ring_latency(nodes, msg_bytes, self.scale_out_bw, self.scale_out_latency)
     }
 
     /// Point-to-point activation transfer latency between PP stages (seconds).
@@ -77,10 +111,25 @@ impl ClusterConfig {
         if self.pp <= 1 {
             return 0.0;
         }
+        let scale_out_bw = if self.scale_out_bw > 0.0 {
+            self.scale_out_bw
+        } else {
+            self.internode_bw
+        };
         let (bw, latency) = if intranode {
+            if self.spans_scale_out(self.pp) {
+                let boundaries = (self.pp - 1) as f64;
+                let cross_boundaries = ((self.pp - 1) / self.gpus_per_node.max(1)) as f64;
+                let local_boundaries = boundaries - cross_boundaries;
+                let local =
+                    self.scale_up_latency + activation_bytes as f64 / self.scale_up_bw.max(1.0);
+                let remote =
+                    self.scale_out_latency + activation_bytes as f64 / scale_out_bw.max(1.0);
+                return (local_boundaries * local + cross_boundaries * remote) / boundaries;
+            }
             (self.scale_up_bw, self.scale_up_latency)
         } else {
-            (self.internode_bw, 0.0) // DCN latency not modelled separately
+            (scale_out_bw, self.scale_out_latency)
         };
         if bw <= 0.0 {
             return 0.0;
@@ -105,7 +154,18 @@ impl ClusterConfig {
         }
         let tokens_per_gpu = (batch_tokens / self.ep as u64).max(1);
         let msg_bytes = tokens_per_gpu * d_model as u64 * activation_bytes as u64;
-        let bw_term = (self.ep - 1) as f64 / self.ep as f64 * msg_bytes as f64 / self.scale_up_bw;
-        self.scale_up_latency + bw_term
+        let traffic_frac = (self.ep - 1) as f64 / self.ep as f64;
+
+        if !self.spans_scale_out(self.ep) {
+            return self.scale_up_latency + traffic_frac * msg_bytes as f64 / self.scale_up_bw;
+        }
+
+        let local_ep = self.gpus_per_node.max(1).min(self.ep);
+        let local_frac = (local_ep - 1) as f64 / self.ep as f64;
+        let remote_frac = (self.ep - local_ep) as f64 / self.ep as f64;
+        self.scale_up_latency
+            + local_frac * msg_bytes as f64 / self.scale_up_bw
+            + self.scale_out_latency
+            + remote_frac * msg_bytes as f64 / self.scale_out_bw
     }
 }

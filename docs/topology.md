@@ -1,8 +1,7 @@
 # Topology and scope
 
-**tokenmill simulates a single scale-up domain — one rack / one pod.**
-DCN (data-center network), Ethernet, InfiniBand, cross-rack traffic, and
-inter-pod RDMA are out of scope.
+**tokenmill simulates one scale-up domain by default, with an optional scale-out
+network tier for multi-node TP/PP/EP.**
 
 This page documents which fabric is treated as the "scale-up" layer for each
 accelerator family, why we draw the line where we do, and the few situations
@@ -25,18 +24,47 @@ interconnect that exists inside a single server, rack, or pod:
 
 All collective formulas in [`src/hardware/cluster.rs`](../src/hardware/cluster.rs)
 (`all_reduce_latency`, `ep_all_to_all_latency`, `pp_transfer_latency`) use these
-two fields. The same ring-allreduce algebra — `2(N−1) × (α + chunk/β)` — runs
-for every vendor; only the per-link bandwidth and latency change.
+fields. When no scale-out network is configured, the same ring-allreduce algebra
+— `2(N−1) × (α + chunk/β)` — runs for every vendor; only the per-link bandwidth
+and latency change.
 
-## What's NOT modelled
+## Scale-out networking
+
+By default, `--scale-out-bw-gbps 0` preserves the legacy assumption that TP/PP/EP
+run inside one uniform scale-up fabric. To model multi-node serving, set:
+
+```bash
+tokenmill --gpu b200 --model llama-70b-fp8 \
+  --tp 16 --gpus-per-node 8 \
+  --scale-out-bw-gbps 50 --scale-out-latency-us 5
+```
+
+The simulator then treats parallel groups larger than `--gpus-per-node` as
+cross-node:
+
+- **TP all-reduce** uses a hierarchical approximation: reduce within each node,
+  all-reduce across nodes over scale-out, then broadcast within each node.
+- **PP activation transfer** uses an average boundary cost. In-node boundaries
+  use scale-up; boundaries between nodes use scale-out.
+- **EP all-to-all** splits per-GPU expert traffic into local and remote fractions.
+  Remote traffic uses scale-out bandwidth and latency.
+
+Typical `--scale-out-bw-gbps` examples:
+
+| Network | Usable per-GPU direction | Example flag |
+|---|---:|---|
+| 200 GbE / HDR IB | ~25 GB/s | `--scale-out-bw-gbps 25` |
+| 400 GbE / NDR IB | ~50 GB/s | `--scale-out-bw-gbps 50` |
+| 800 GbE / XDR-class IB | ~100 GB/s | `--scale-out-bw-gbps 100` |
+
+Use the effective bandwidth available to one accelerator after NIC sharing,
+PCIe, routing, and congestion, not just the switch headline.
+
+## What's still not modelled
 
 The simulator deliberately does **not** model:
 
-- **DCN / Ethernet / InfiniBand** between racks or pods. Cluster build-outs that
-  span racks (e.g. multi-rack NVL72 + IB Quantum, GPU clouds with leaf-spine)
-  pay a real cost for cross-rack collectives that we don't account for.
-- **Network congestion** from other tenants sharing the fabric. Single-tenant
-  pod assumption.
+- **Network congestion** from other tenants or jobs sharing the fabric.
 - **Topology-aware placement** within the pod. TP=8 spanning two NVLink switches
   costs more than TP=8 inside one — we use a single uniform bandwidth.
 - **Failure / degraded links**. Every link runs at spec.
@@ -46,8 +74,8 @@ The simulator deliberately does **not** model:
 `--disaggregate` separates prefill and decode onto two GPU pools. The KV cache
 must be transferred between them — and the two pools could be on different racks.
 We model this with a separate `internode_bw` field on `ClusterConfig`,
-configurable via `--internode-bw-gbps` (default 200 GB/s — typical 200 Gbps
-RoCE / IB). The transfer cost is added once per request, at handoff. PP transfer
+configurable via `--internode-bw-gbps` (default 200 GB/s). The transfer cost is
+added once per request, at handoff. PP transfer
 between pools also uses `internode_bw` when the second stage is cross-node.
 
 ## Where the assumption breaks down
@@ -65,11 +93,10 @@ Three cases where this matters in practice:
    dataflow that maps better than a generic ring; observed TPOT can be a few
    ms instead of the >12 ms we predict at TP=358.
 
-3. **Multi-rack clusters** (e.g. 32×B200 split across 4 racks) — the simulator
-   uses one uniform `scale_up_bandwidth` for the whole cluster, ignoring that
-   cross-rack traffic should drop to `internode_bw` rates. To approximate, set
-   `--internode-bw-gbps` to the actual cross-rack link rate and use `--disaggregate`
-   to model the boundary; for general multi-rack TP, you'd need to extend the model.
+3. **Multi-rack clusters** (e.g. 32×B200 split across 4 racks) — the scale-out
+   tier captures the first-order Ethernet/IB bandwidth and latency penalty, but
+   it does not model leaf-spine oversubscription, adaptive routing, congestion,
+   or topology-aware rank placement.
 
 4. **Cerebras multi-system TP** — one CS-3 has a 214 Pb/s internal wafer fabric,
    but TP across CS-3 systems crosses the external system boundary. The preset
@@ -78,9 +105,9 @@ Three cases where this matters in practice:
 
 ## Why this scope
 
-LLM inference is overwhelmingly served from single-rack / single-pod
-configurations: NVL72 is one rack, HGX H100 is one server, a TPU 8i pod is one
-unit, GroqRack is one rack. The simulator targets these production deployments
-with kernel-time accuracy. Multi-rack training-style topologies (where DCN
-dominates) are a different modelling problem — out of scope here, and well-
-covered by existing tools like NVIDIA's SimAI and Google's XLA cost model.
+LLM inference is often served from single-rack / single-pod configurations:
+NVL72 is one rack, HGX H100 is one server, a TPU 8i pod is one unit, GroqRack is
+one rack. The simulator targets these deployments first, then adds a lightweight
+scale-out tier for serving studies that spill beyond one node. Full topology
+simulation with congestion and route-level placement remains a different
+modelling problem.
