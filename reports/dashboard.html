@@ -285,6 +285,8 @@
     let rows = [];
     let sortKey = 'cost_per_million_tokens_usd';
     let sortDir = 1;
+    let compareSortKey = 'tpot_p95_ms';
+    let compareSortDir = 1;
 
     const dataVersion = 'frontier-moe-2026-06-04';
     let manifestRows = [];
@@ -465,7 +467,18 @@
           byHardware.set(row._hardware, row);
         }
       }
-      return [...byHardware.values()].sort((a, b) => a.tpot_p95_ms - b.tpot_p95_ms);
+      return [...byHardware.values()];
+    }
+    function compareValues(a, b, key, dir) {
+      const av = a[key], bv = b[key];
+      if (typeof av === 'number' && typeof bv === 'number') {
+        return (av - bv) * dir;
+      }
+      return String(av).localeCompare(String(bv)) * dir;
+    }
+    function sortMark(key, activeKey, dir) {
+      if (key !== activeKey) return '';
+      return dir > 0 ? ' ▲' : ' ▼';
     }
     function metricBar(value, max, lowerIsBetter) {
       if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(max) || max <= 0) return '';
@@ -473,7 +486,7 @@
       return `<div class="metric-bar"><div class="metric-fill" style="width:${pct}%"></div></div>`;
     }
     function renderCompare(data) {
-      const rows = bestPerHardware(data);
+      const rows = bestPerHardware(data).sort((a, b) => compareValues(a, b, compareSortKey, compareSortDir));
       const table = document.getElementById('compare');
       if (rows.length === 0) {
         table.innerHTML = '<tr><td>No rows match the current filters.</td></tr>';
@@ -483,10 +496,12 @@
       const maxCost = Math.max(...rows.map(r => r.cost_per_million_tokens_usd || 0), 1);
       const maxEnergy = Math.max(...rows.map(r => r.energy_per_token_mj || 0), 1);
       const maxThroughput = Math.max(...rows.map(r => r.token_throughput || 0), 1);
-      const head = `<tr>
-        <th>HW preset</th><th>GPU</th><th>Model</th><th>Precision</th><th>TP</th><th>RPS</th>
-        <th>Tok/s</th><th>TTFT p95</th><th>TPOT p95</th><th>$/Mtok</th><th>mJ/token</th>
-      </tr>`;
+      const cols = [
+        ['_hardware', 'HW preset'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
+        ['tp', 'TP'], ['arrival_rate', 'RPS'], ['token_throughput', 'Tok/s'], ['ttft_p95_ms', 'TTFT p95'],
+        ['tpot_p95_ms', 'TPOT p95'], ['cost_per_million_tokens_usd', '$/Mtok'], ['energy_per_token_mj', 'mJ/token']
+      ];
+      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}${sortMark(k, compareSortKey, compareSortDir)}</th>`).join('') + '</tr>';
       const body = rows.map(r => `<tr>
         <td>${r._hardware}</td>
         <td>${r.gpu}</td>
@@ -501,6 +516,11 @@
         <td class="bar-cell">${fmt(r.energy_per_token_mj, 1)}${metricBar(r.energy_per_token_mj, maxEnergy, true)}</td>
       </tr>`).join('');
       table.innerHTML = head + body;
+      table.querySelectorAll('th[data-k]').forEach(th => th.onclick = () => {
+        const k = th.dataset.k;
+        if (compareSortKey === k) compareSortDir *= -1; else { compareSortKey = k; compareSortDir = 1; }
+        render();
+      });
     }
     function renderTable(data) {
       const cols = [
@@ -513,7 +533,7 @@
         const av = a[sortKey], bv = b[sortKey];
         return (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))) * sortDir;
       });
-      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}</th>`).join('') + '</tr>';
+      const head = '<tr>' + cols.map(([k, n]) => `<th data-k="${k}">${n}${sortMark(k, sortKey, sortDir)}</th>`).join('') + '</tr>';
       const body = sorted.map(r => `<tr>
         <td>${r._report_title}</td><td>${r._system}</td><td>${r._hardware}</td><td>${r.gpu}</td><td>${r.model}</td><td>${r._precision}</td>
         <td>${r.tp}</td><td>${r.pp}</td><td>${fmt(r.arrival_rate, 2)}</td><td>${r.completions}</td><td>${fmt(r.token_throughput, 0)}</td>
