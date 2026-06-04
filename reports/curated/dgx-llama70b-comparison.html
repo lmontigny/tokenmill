@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tokenmill study report</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f6f8fb;
+  --panel: #ffffff;
+  --ink: #17202a;
+  --muted: #5d6b7a;
+  --line: #d9e0e8;
+  --accent: #0f766e;
+  --accent2: #2563eb;
+}
+body {
+  margin: 0;
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+header {
+  padding: 28px 32px 18px;
+  background: #0f172a;
+  color: white;
+}
+h1 { margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }
+h2 { margin: 0 0 14px; font-size: 18px; }
+main { padding: 24px 32px 40px; }
+.sub { color: #cbd5e1; }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.label { color: var(--muted); font-size: 12px; text-transform: uppercase; }
+.value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.small { color: var(--muted); margin-top: 3px; }
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 14px 0 18px;
+}
+input, select {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: white;
+  min-width: 170px;
+}
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+}
+svg { width: 100%; height: 260px; display: block; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: right; }
+th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align: left; }
+th { color: var(--muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+td { white-space: nowrap; }
+.table-wrap { overflow-x: auto; }
+.note { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>tokenmill study report</h1>
+  <div class="sub">8 runs · generated unix 1780574186</div>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <section>
+    <h2>Filters</h2>
+    <div class="controls">
+      <input id="search" placeholder="Search model, GPU, scheduler">
+      <select id="modelFilter"><option value="">All models</option></select>
+      <select id="gpuFilter"><option value="">All GPUs</option></select>
+      <select id="precisionFilter"><option value="">All precision</option></select>
+    </div>
+  </section>
+  <section>
+    <h2>Charts</h2>
+    <div class="charts">
+      <div><div class="label">Cost vs TPOT p95</div><svg id="scatter"></svg></div>
+      <div><div class="label">Throughput by run</div><svg id="throughput"></svg></div>
+      <div><div class="label">Energy per token by run</div><svg id="energy"></svg></div>
+    </div>
+  </section>
+  <section>
+    <h2>Results</h2>
+    <div class="table-wrap">
+      <table id="results"></table>
+    </div>
+  </section>
+  <section>
+    <h2>Study Configuration</h2>
+    <p class="note">duration=10s, prompt_mean=1024, output_mean=256, scheduler=chunked-prefill, latency model is reported per row.</p>
+  </section>
+</main>
+<script id="data" type="application/json">[
+  {
+    "model": "llama-70b-fp8",
+    "gpu": "H200-SXM5",
+    "scheduler": "chunked-prefill TP=8",
+    "tp": 8,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 11,
+    "preemptions": 0,
+    "throughput_rps": 1.1,
+    "token_throughput": 303.3,
+    "kv_util_mean_pct": 0.04473396286757909,
+    "ttft_p50_ms": 31.375,
+    "ttft_p95_ms": 42.879,
+    "ttft_p99_ms": 42.879,
+    "prefill_p50_ms": 22.319,
+    "prefill_p95_ms": 38.367,
+    "prefill_p99_ms": 38.367,
+    "kv_transfer_p50_ms": 9.047,
+    "kv_transfer_p95_ms": 9.103,
+    "kv_transfer_p99_ms": 9.103,
+    "tpot_p50_ms": 4.627,
+    "tpot_p95_ms": 4.691,
+    "tpot_p99_ms": 4.691,
+    "total_energy_kj": 21.482485166476046,
+    "mean_power_kw": 2.1482485166476044,
+    "energy_per_token_mj": 7082.916309421709,
+    "energy_per_request_j": 1952.9531969523678,
+    "total_cost_usd": 0.1,
+    "cost_per_million_tokens_usd": 32.97065611605671,
+    "cost_per_request_usd": 0.009090909090909092,
+    "cluster_cost_per_hour_usd": 36.0
+  },
+  {
+    "model": "llama-70b-fp8",
+    "gpu": "B200-SXM",
+    "scheduler": "chunked-prefill TP=8",
+    "tp": 8,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 11,
+    "preemptions": 0,
+    "throughput_rps": 1.1,
+    "token_throughput": 303.3,
+    "kv_util_mean_pct": 0.027978889204083313,
+    "ttft_p50_ms": 22.879,
+    "ttft_p95_ms": 26.655,
+    "ttft_p99_ms": 26.655,
+    "prefill_p50_ms": 15.463,
+    "prefill_p95_ms": 22.959,
+    "prefill_p99_ms": 22.959,
+    "kv_transfer_p50_ms": 7.403,
+    "kv_transfer_p95_ms": 7.407,
+    "kv_transfer_p99_ms": 7.407,
+    "tpot_p50_ms": 3.741,
+    "tpot_p95_ms": 3.795,
+    "tpot_p99_ms": 3.795,
+    "total_energy_kj": 30.462851795660796,
+    "mean_power_kw": 3.04628517956608,
+    "energy_per_token_mj": 10043.802108691329,
+    "energy_per_request_j": 2769.3501632418906,
+    "total_cost_usd": 0.14444444444444446,
+    "cost_per_million_tokens_usd": 47.624281056526364,
+    "cost_per_request_usd": 0.013131313131313133,
+    "cluster_cost_per_hour_usd": 52.0
+  },
+  {
+    "model": "llama-70b-fp8",
+    "gpu": "H200-SXM5",
+    "scheduler": "chunked-prefill TP=16",
+    "tp": 16,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 10,
+    "preemptions": 0,
+    "throughput_rps": 1.0,
+    "token_throughput": 267.5,
+    "kv_util_mean_pct": 0.03028649594304075,
+    "ttft_p50_ms": 68.287,
+    "ttft_p95_ms": 131.711,
+    "ttft_p99_ms": 131.711,
+    "prefill_p50_ms": 55.551,
+    "prefill_p95_ms": 119.039,
+    "prefill_p99_ms": 119.039,
+    "kv_transfer_p50_ms": 12.679,
+    "kv_transfer_p95_ms": 12.743,
+    "kv_transfer_p99_ms": 12.743,
+    "tpot_p50_ms": 6.667,
+    "tpot_p95_ms": 7.187,
+    "tpot_p99_ms": 7.187,
+    "total_energy_kj": 41.171476308171016,
+    "mean_power_kw": 4.117147630817103,
+    "energy_per_token_mj": 15391.206096512531,
+    "energy_per_request_j": 4117.147630817102,
+    "total_cost_usd": 0.2,
+    "cost_per_million_tokens_usd": 74.76635514018692,
+    "cost_per_request_usd": 0.02,
+    "cluster_cost_per_hour_usd": 72.0
+  },
+  {
+    "model": "llama-70b-fp8",
+    "gpu": "B200-SXM",
+    "scheduler": "chunked-prefill TP=16",
+    "tp": 16,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 10,
+    "preemptions": 0,
+    "throughput_rps": 1.0,
+    "token_throughput": 267.5,
+    "kv_util_mean_pct": 0.02064994844459141,
+    "ttft_p50_ms": 60.287,
+    "ttft_p95_ms": 118.591,
+    "ttft_p99_ms": 118.591,
+    "prefill_p50_ms": 48.479,
+    "prefill_p95_ms": 106.815,
+    "prefill_p99_ms": 106.815,
+    "kv_transfer_p50_ms": 11.791,
+    "kv_transfer_p95_ms": 11.903,
+    "kv_transfer_p99_ms": 11.903,
+    "tpot_p50_ms": 6.203,
+    "tpot_p95_ms": 6.663,
+    "tpot_p99_ms": 6.663,
+    "total_energy_kj": 58.8003540986432,
+    "mean_power_kw": 5.880035409864321,
+    "energy_per_token_mj": 21981.440784539514,
+    "energy_per_request_j": 5880.03540986432,
+    "total_cost_usd": 0.2888888888888889,
+    "cost_per_million_tokens_usd": 107.99584631360334,
+    "cost_per_request_usd": 0.02888888888888889,
+    "cluster_cost_per_hour_usd": 104.0
+  },
+  {
+    "model": "llama-70b-w4a8kv4",
+    "gpu": "H200-SXM5",
+    "scheduler": "chunked-prefill TP=8",
+    "tp": 8,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 11,
+    "preemptions": 0,
+    "throughput_rps": 1.1,
+    "token_throughput": 303.3,
+    "kv_util_mean_pct": 0.015452674733515293,
+    "ttft_p50_ms": 23.071,
+    "ttft_p95_ms": 41.727,
+    "ttft_p99_ms": 41.727,
+    "prefill_p50_ms": 19.087,
+    "prefill_p95_ms": 38.367,
+    "prefill_p99_ms": 38.367,
+    "kv_transfer_p50_ms": 6.767,
+    "kv_transfer_p95_ms": 6.775,
+    "kv_transfer_p99_ms": 6.775,
+    "tpot_p50_ms": 3.419,
+    "tpot_p95_ms": 3.535,
+    "tpot_p99_ms": 3.535,
+    "total_energy_kj": 21.27869794592655,
+    "mean_power_kw": 2.1278697945926552,
+    "energy_per_token_mj": 7015.7263257258655,
+    "energy_per_request_j": 1934.4270859933226,
+    "total_cost_usd": 0.1,
+    "cost_per_million_tokens_usd": 32.97065611605671,
+    "cost_per_request_usd": 0.009090909090909092,
+    "cluster_cost_per_hour_usd": 36.0
+  },
+  {
+    "model": "llama-70b-w4a8kv4",
+    "gpu": "B200-SXM",
+    "scheduler": "chunked-prefill TP=8",
+    "tp": 8,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 11,
+    "preemptions": 0,
+    "throughput_rps": 1.1,
+    "token_throughput": 303.3,
+    "kv_util_mean_pct": 0.009847587348218879,
+    "ttft_p50_ms": 11.599,
+    "ttft_p95_ms": 20.239,
+    "ttft_p99_ms": 20.239,
+    "prefill_p50_ms": 8.631,
+    "prefill_p95_ms": 17.263,
+    "prefill_p99_ms": 17.263,
+    "kv_transfer_p50_ms": 2.971,
+    "kv_transfer_p95_ms": 5.947,
+    "kv_transfer_p99_ms": 5.947,
+    "tpot_p50_ms": 2.973,
+    "tpot_p95_ms": 3.043,
+    "tpot_p99_ms": 3.043,
+    "total_energy_kj": 30.141047409515018,
+    "mean_power_kw": 3.0141047409515016,
+    "energy_per_token_mj": 9937.701091168816,
+    "energy_per_request_j": 2740.0952190468197,
+    "total_cost_usd": 0.14444444444444446,
+    "cost_per_million_tokens_usd": 47.624281056526364,
+    "cost_per_request_usd": 0.013131313131313133,
+    "cluster_cost_per_hour_usd": 52.0
+  },
+  {
+    "model": "llama-70b-w4a8kv4",
+    "gpu": "H200-SXM5",
+    "scheduler": "chunked-prefill TP=16",
+    "tp": 16,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 10,
+    "preemptions": 0,
+    "throughput_rps": 1.0,
+    "token_throughput": 267.5,
+    "kv_util_mean_pct": 0.013955681155940583,
+    "ttft_p50_ms": 65.727,
+    "ttft_p95_ms": 130.111,
+    "ttft_p99_ms": 130.111,
+    "prefill_p50_ms": 54.271,
+    "prefill_p95_ms": 118.655,
+    "prefill_p99_ms": 118.655,
+    "kv_transfer_p50_ms": 11.479,
+    "kv_transfer_p95_ms": 11.599,
+    "kv_transfer_p99_ms": 11.599,
+    "tpot_p50_ms": 6.087,
+    "tpot_p95_ms": 6.607,
+    "tpot_p99_ms": 6.607,
+    "total_energy_kj": 41.17170131648719,
+    "mean_power_kw": 4.117170131648718,
+    "energy_per_token_mj": 15391.290211770913,
+    "energy_per_request_j": 4117.170131648719,
+    "total_cost_usd": 0.2,
+    "cost_per_million_tokens_usd": 74.76635514018692,
+    "cost_per_request_usd": 0.02,
+    "cluster_cost_per_hour_usd": 72.0
+  },
+  {
+    "model": "llama-70b-w4a8kv4",
+    "gpu": "B200-SXM",
+    "scheduler": "chunked-prefill TP=16",
+    "tp": 16,
+    "pp": 1,
+    "disaggregate": false,
+    "arrival_rate": 1.0,
+    "duration_s": 10.0,
+    "latency_mode": "roofline",
+    "completions": 11,
+    "preemptions": 0,
+    "throughput_rps": 1.1,
+    "token_throughput": 303.3,
+    "kv_util_mean_pct": 0.010013217024270556,
+    "ttft_p50_ms": 57.727,
+    "ttft_p95_ms": 113.983,
+    "ttft_p99_ms": 113.983,
+    "prefill_p50_ms": 46.687,
+    "prefill_p95_ms": 102.911,
+    "prefill_p99_ms": 102.911,
+    "kv_transfer_p50_ms": 11.055,
+    "kv_transfer_p95_ms": 11.175,
+    "kv_transfer_p99_ms": 11.175,
+    "tpot_p50_ms": 5.767,
+    "tpot_p95_ms": 6.271,
+    "tpot_p99_ms": 6.271,
+    "total_energy_kj": 58.79650016988443,
+    "mean_power_kw": 5.879650016988444,
+    "energy_per_token_mj": 19385.591879289295,
+    "energy_per_request_j": 5345.1363790804035,
+    "total_cost_usd": 0.2888888888888889,
+    "cost_per_million_tokens_usd": 95.24856211305273,
+    "cost_per_request_usd": 0.026262626262626265,
+    "cluster_cost_per_hour_usd": 104.0
+  }
+]</script>
+<script>
+const rows = JSON.parse(document.getElementById('data').textContent);
+let sortKey = 'cost_per_million_tokens_usd';
+let sortDir = 1;
+
+function precision(model) {
+  if (model.includes('nvfp4')) return 'NVFP4 sparse';
+  if (model.includes('w4a8kv4')) return 'W4A8KV4';
+  if (model.includes('w4a16')) return 'W4A16';
+  if (model.includes('fp8')) return 'FP8';
+  return 'BF16/FP16';
+}
+function fmt(v, d=1) {
+  if (!Number.isFinite(v)) return '';
+  return Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+}
+function uniq(values) { return [...new Set(values)].sort(); }
+function fillSelect(id, values) {
+  const el = document.getElementById(id);
+  for (const v of values) {
+    const o = document.createElement('option');
+    o.value = v; o.textContent = v; el.appendChild(o);
+  }
+}
+fillSelect('modelFilter', uniq(rows.map(r => r.model)));
+fillSelect('gpuFilter', uniq(rows.map(r => r.gpu)));
+fillSelect('precisionFilter', uniq(rows.map(r => precision(r.model))));
+
+function filtered() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const m = document.getElementById('modelFilter').value;
+  const g = document.getElementById('gpuFilter').value;
+  const p = document.getElementById('precisionFilter').value;
+  return rows.filter(r =>
+    (!q || `${r.model} ${r.gpu} ${r.scheduler}`.toLowerCase().includes(q)) &&
+    (!m || r.model === m) &&
+    (!g || r.gpu === g) &&
+    (!p || precision(r.model) === p)
+  );
+}
+function bestBy(data, key, lower=true) {
+  const valid = data.filter(r => Number.isFinite(r[key]) && r[key] > 0);
+  valid.sort((a,b) => lower ? a[key] - b[key] : b[key] - a[key]);
+  return valid[0];
+}
+function renderCards(data) {
+  const cards = [
+    ['Cheapest', bestBy(data, 'cost_per_million_tokens_usd'), r => `$${fmt(r.cost_per_million_tokens_usd, 2)}/Mtok`],
+    ['Lowest TPOT p95', bestBy(data, 'tpot_p95_ms'), r => `${fmt(r.tpot_p95_ms, 1)} ms`],
+    ['Highest throughput', bestBy(data, 'token_throughput', false), r => `${fmt(r.token_throughput, 0)} tok/s`],
+    ['Lowest energy/token', bestBy(data, 'energy_per_token_mj'), r => `${fmt(r.energy_per_token_mj, 1)} mJ`],
+  ];
+  document.getElementById('cards').innerHTML = cards.map(([label, row, val]) => `
+    <div class="card"><div class="label">${label}</div>
+    <div class="value">${row ? val(row) : 'n/a'}</div>
+    <div class="small">${row ? `${row.model} · ${row.gpu} · ${row.scheduler}` : ''}</div></div>
+  `).join('');
+}
+function renderTable(data) {
+  const cols = [
+    ['model','Model'], ['gpu','GPU/System'], ['precision','Precision'], ['tp','TP'], ['pp','PP'],
+    ['arrival_rate','RPS in'], ['completions','Done'], ['token_throughput','Tok/s'],
+    ['ttft_p95_ms','TTFT p95 ms'], ['tpot_p95_ms','TPOT p95 ms'],
+    ['cost_per_million_tokens_usd','$/Mtok'], ['energy_per_token_mj','mJ/token'], ['kv_util_mean_pct','KV %']
+  ];
+  const sorted = [...data].sort((a,b) => {
+    const av = sortKey === 'precision' ? precision(a.model) : a[sortKey];
+    const bv = sortKey === 'precision' ? precision(b.model) : b[sortKey];
+    return (typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))) * sortDir;
+  });
+  const head = '<tr>' + cols.map(([k,n]) => `<th data-k="${k}">${n}</th>`).join('') + '</tr>';
+  const body = sorted.map(r => `<tr>
+    <td>${r.model}</td><td>${r.gpu}</td><td>${precision(r.model)}</td>
+    <td>${r.tp}</td><td>${r.pp}</td><td>${fmt(r.arrival_rate, 2)}</td><td>${r.completions}</td>
+    <td>${fmt(r.token_throughput, 0)}</td><td>${fmt(r.ttft_p95_ms, 1)}</td><td>${fmt(r.tpot_p95_ms, 1)}</td>
+    <td>${fmt(r.cost_per_million_tokens_usd, 2)}</td><td>${fmt(r.energy_per_token_mj, 1)}</td><td>${fmt(r.kv_util_mean_pct, 1)}</td>
+  </tr>`).join('');
+  const table = document.getElementById('results');
+  table.innerHTML = head + body;
+  table.querySelectorAll('th').forEach(th => th.onclick = () => {
+    const k = th.dataset.k;
+    if (sortKey === k) sortDir *= -1; else { sortKey = k; sortDir = 1; }
+    render();
+  });
+}
+function drawBars(id, data, key, color) {
+  const svg = document.getElementById(id);
+  const w = svg.clientWidth || 420, h = 260, pad = 34;
+  const vals = data.map(r => r[key]).filter(v => Number.isFinite(v));
+  const max = Math.max(...vals, 1);
+  const barW = Math.max(3, (w - pad * 2) / Math.max(data.length, 1) - 3);
+  svg.innerHTML = data.map((r,i) => {
+    const x = pad + i * ((w - pad * 2) / Math.max(data.length, 1));
+    const bh = (h - pad * 2) * ((r[key] || 0) / max);
+    const y = h - pad - bh;
+    return `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${color}"><title>${r.model} · ${r.gpu}: ${fmt(r[key], 2)}</title></rect>`;
+  }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+}
+function drawScatter(data) {
+  const svg = document.getElementById('scatter');
+  const w = svg.clientWidth || 420, h = 260, pad = 36;
+  const valid = data.filter(r => r.cost_per_million_tokens_usd > 0 && r.tpot_p95_ms > 0);
+  const maxX = Math.max(...valid.map(r => r.tpot_p95_ms), 1);
+  const maxY = Math.max(...valid.map(r => r.cost_per_million_tokens_usd), 1);
+  svg.innerHTML = valid.map(r => {
+    const x = pad + (w - pad * 2) * r.tpot_p95_ms / maxX;
+    const y = h - pad - (h - pad * 2) * r.cost_per_million_tokens_usd / maxY;
+    return `<circle cx="${x}" cy="${y}" r="5" fill="#0f766e"><title>${r.model} · ${r.gpu}: ${fmt(r.tpot_p95_ms,1)} ms, $${fmt(r.cost_per_million_tokens_usd,2)}/Mtok</title></circle>`;
+  }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+}
+function render() {
+  const data = filtered();
+  renderCards(data);
+  renderTable(data);
+  drawScatter(data);
+  drawBars('throughput', data, 'token_throughput', '#2563eb');
+  drawBars('energy', data, 'energy_per_token_mj', '#dc2626');
+}
+['search','modelFilter','gpuFilter','precisionFilter'].forEach(id => document.getElementById(id).addEventListener('input', render));
+render();
+</script>
+</body>
+</html>

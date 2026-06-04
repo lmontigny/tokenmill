@@ -13,6 +13,13 @@ artifacts.
 
 ## Curated Report Workflow
 
+Current curated reports:
+
+- [`curated/llama8b-precision-hardware.html`](curated/llama8b-precision-hardware.html)
+  compares Llama 8B FP8 vs W4A8KV4 across H100, H200, and B200 at 1 and 5 rps.
+- [`curated/dgx-llama70b-comparison.html`](curated/dgx-llama70b-comparison.html)
+  compares DGX H200 vs DGX B200 for Llama 70B FP8 and W4A8KV4 at TP=8 and TP=16.
+
 Generate a report into `curated/`:
 
 ```bash
@@ -43,3 +50,33 @@ cargo run -- \
 
 When adding a curated report, include the exact command in the commit message or
 PR description so the report can be regenerated.
+
+## Regenerating Current Reports
+
+```bash
+cargo run -- \
+  --study-models llama-8b-fp8,llama-8b-w4a8kv4 \
+  --study-gpus h100,h200,b200 \
+  --study-tps 1 \
+  --study-arrival-rates 1,5 \
+  --scheduler chunked-prefill \
+  --prompt-mean 512 \
+  --output-mean 128 \
+  --duration 10 \
+  --json-out reports/curated/llama8b-precision-hardware.json \
+  --html reports/curated/llama8b-precision-hardware.html
+```
+
+```bash
+cargo run -- \
+  --study-models llama-70b-fp8,llama-70b-w4a8kv4 \
+  --study-systems dgx-h200,dgx-b200 \
+  --study-tps 8,16 \
+  --study-arrival-rates 1 \
+  --scheduler chunked-prefill \
+  --prompt-mean 1024 \
+  --output-mean 256 \
+  --duration 10 \
+  --json-out reports/curated/dgx-llama70b-comparison.json \
+  --html reports/curated/dgx-llama70b-comparison.html
+```
