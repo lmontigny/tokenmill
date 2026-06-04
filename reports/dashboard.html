@@ -94,8 +94,37 @@
     }
     svg {
       width: 100%;
-      height: 270px;
+      height: 310px;
       display: block;
+    }
+    .chart {
+      min-width: 0;
+    }
+    .chart-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      margin: 2px 0 12px;
+    }
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      display: inline-block;
     }
     .table-wrap {
       overflow-x: auto;
@@ -128,6 +157,10 @@
     }
     .error {
       color: var(--red);
+    }
+    .axis {
+      fill: var(--muted);
+      font-size: 11px;
     }
     a {
       color: var(--accent);
@@ -170,11 +203,12 @@
     <div class="cards" id="cards"></div>
     <section class="panel">
       <h2>Charts</h2>
+      <div class="legend" id="legend"></div>
       <div class="charts">
-        <div><div class="label">Cost vs TPOT p95</div><svg id="scatter"></svg></div>
-        <div><div class="label">Throughput by configuration</div><svg id="throughput"></svg></div>
-        <div><div class="label">Energy per token by configuration</div><svg id="energy"></svg></div>
-        <div><div class="label">TPOT p95 by configuration</div><svg id="tpot"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">Cost vs TPOT p95</div></div><svg id="scatter"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">Throughput by configuration</div></div><svg id="throughput"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">Energy per token by configuration</div></div><svg id="energy"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">TPOT p95 by configuration</div></div><svg id="tpot"></svg></div>
       </div>
     </section>
     <section class="panel">
@@ -190,6 +224,14 @@
     let sortDir = 1;
 
     const reportMeta = new Map();
+    const precisionColors = {
+      'BF16/FP16': '#64748b',
+      'FP8': '#2563eb',
+      'FP4': '#7c3aed',
+      'W4A16': '#b45309',
+      'W4A8KV4': '#0f766e',
+      'NVFP4 sparse': '#dc2626',
+    };
 
     function precision(model) {
       if (model.includes('nvfp4')) return 'NVFP4 sparse';
@@ -209,6 +251,12 @@
     function fmt(v, d = 1) {
       if (!Number.isFinite(v)) return '';
       return Number(v).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
+    }
+    function colorFor(row) {
+      return precisionColors[row._precision] || '#475569';
+    }
+    function configLabel(row) {
+      return `${row.model} · ${row._system} · ${row.gpu} · TP=${row.tp}`;
     }
     function uniq(values) {
       return [...new Set(values.filter(v => v !== undefined && v !== null && v !== ''))].sort((a, b) => String(a).localeCompare(String(b)));
@@ -294,6 +342,12 @@
       ];
       document.getElementById('cards').innerHTML = cards.join('');
     }
+    function renderLegend(data) {
+      const precision = uniq(data.map(r => r._precision));
+      document.getElementById('legend').innerHTML = precision.map(p =>
+        `<span class="legend-item"><span class="swatch" style="background:${precisionColors[p] || '#475569'}"></span>${p}</span>`
+      ).join('');
+    }
     function renderTable(data) {
       const cols = [
         ['_report_title', 'Report'], ['_system', 'System'], ['gpu', 'GPU'], ['model', 'Model'], ['_precision', 'Precision'],
@@ -320,41 +374,75 @@
         render();
       });
     }
-    function drawBars(id, data, key, color) {
+    function drawBars(id, data, key, yLabel, lowerIsBetter) {
       const svg = document.getElementById(id);
-      const w = svg.clientWidth || 420, h = 270, pad = 34;
-      const vals = data.map(r => r[key]).filter(Number.isFinite);
+      const w = svg.clientWidth || 420, h = 310;
+      const pad = { left: 58, right: 16, top: 16, bottom: 54 };
+      const plotW = w - pad.left - pad.right;
+      const plotH = h - pad.top - pad.bottom;
+      const valid = data.filter(r => Number.isFinite(r[key]) && r[key] >= 0);
+      const shown = [...valid]
+        .sort((a, b) => lowerIsBetter ? a[key] - b[key] : b[key] - a[key])
+        .slice(0, 40);
+      const vals = shown.map(r => r[key]);
       const max = Math.max(...vals, 1);
-      const slot = (w - pad * 2) / Math.max(data.length, 1);
+      const slot = plotW / Math.max(shown.length, 1);
       const barW = Math.max(3, slot - 3);
-      svg.innerHTML = data.map((r, i) => {
-        const x = pad + i * slot;
-        const bh = (h - pad * 2) * ((r[key] || 0) / max);
-        const y = h - pad - bh;
-        return `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${color}"><title>${r.model} · ${r._system} · ${r.gpu}: ${fmt(r[key], 2)}</title></rect>`;
-      }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+      const ticks = [0, max / 2, max];
+      const axes = `
+        <line x1="${pad.left}" y1="${h - pad.bottom}" x2="${w - pad.right}" y2="${h - pad.bottom}" stroke="#94a3b8"/>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${h - pad.bottom}" stroke="#94a3b8"/>
+        ${ticks.map(t => {
+          const y = h - pad.bottom - plotH * t / max;
+          return `<line x1="${pad.left - 4}" y1="${y}" x2="${pad.left}" y2="${y}" stroke="#94a3b8"/><text class="axis" x="${pad.left - 8}" y="${y + 4}" text-anchor="end">${fmt(t, t >= 100 ? 0 : 1)}</text>`;
+        }).join('')}
+        <text class="axis" x="${pad.left + plotW / 2}" y="${h - 12}" text-anchor="middle">Configurations, sorted by ${yLabel} (${shown.length} of ${valid.length} shown)</text>
+        <text class="axis" transform="translate(14 ${pad.top + plotH / 2}) rotate(-90)" text-anchor="middle">${yLabel}</text>
+      `;
+      const bars = shown.map((r, i) => {
+        const x = pad.left + i * slot;
+        const bh = plotH * ((r[key] || 0) / max);
+        const y = h - pad.bottom - bh;
+        return `<rect x="${x}" y="${y}" width="${barW}" height="${bh}" fill="${colorFor(r)}"><title>${configLabel(r)}: ${fmt(r[key], 2)}</title></rect>`;
+      }).join('');
+      svg.innerHTML = axes + bars;
     }
     function drawScatter(data) {
       const svg = document.getElementById('scatter');
-      const w = svg.clientWidth || 420, h = 270, pad = 38;
+      const w = svg.clientWidth || 420, h = 310;
+      const pad = { left: 62, right: 20, top: 16, bottom: 54 };
+      const plotW = w - pad.left - pad.right;
+      const plotH = h - pad.top - pad.bottom;
       const valid = data.filter(r => r.cost_per_million_tokens_usd > 0 && r.tpot_p95_ms > 0);
       const maxX = Math.max(...valid.map(r => r.tpot_p95_ms), 1);
       const maxY = Math.max(...valid.map(r => r.cost_per_million_tokens_usd), 1);
-      svg.innerHTML = valid.map(r => {
-        const x = pad + (w - pad * 2) * r.tpot_p95_ms / maxX;
-        const y = h - pad - (h - pad * 2) * r.cost_per_million_tokens_usd / maxY;
-        return `<circle cx="${x}" cy="${y}" r="5" fill="#0f766e"><title>${r.model} · ${r._system} · ${r.gpu}: ${fmt(r.tpot_p95_ms,1)} ms, $${fmt(r.cost_per_million_tokens_usd,2)}/Mtok</title></circle>`;
-      }).join('') + `<line x1="${pad}" y1="${h-pad}" x2="${w-pad}" y2="${h-pad}" stroke="#94a3b8"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${h-pad}" stroke="#94a3b8"/>`;
+      const axes = `
+        <line x1="${pad.left}" y1="${h - pad.bottom}" x2="${w - pad.right}" y2="${h - pad.bottom}" stroke="#94a3b8"/>
+        <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${h - pad.bottom}" stroke="#94a3b8"/>
+        <text class="axis" x="${pad.left}" y="${h - pad.bottom + 18}" text-anchor="middle">0</text>
+        <text class="axis" x="${w - pad.right}" y="${h - pad.bottom + 18}" text-anchor="end">${fmt(maxX, 1)}</text>
+        <text class="axis" x="${pad.left + plotW / 2}" y="${h - 12}" text-anchor="middle">TPOT p95 (ms, lower is better)</text>
+        <text class="axis" x="${pad.left - 8}" y="${h - pad.bottom + 4}" text-anchor="end">$0</text>
+        <text class="axis" x="${pad.left - 8}" y="${pad.top + 4}" text-anchor="end">$${fmt(maxY, 1)}</text>
+        <text class="axis" transform="translate(14 ${pad.top + plotH / 2}) rotate(-90)" text-anchor="middle">Cost ($ / 1M tokens, lower is better)</text>
+      `;
+      const points = valid.map(r => {
+        const x = pad.left + plotW * r.tpot_p95_ms / maxX;
+        const y = h - pad.bottom - plotH * r.cost_per_million_tokens_usd / maxY;
+        return `<circle cx="${x}" cy="${y}" r="5" fill="${colorFor(r)}" opacity="0.9"><title>${configLabel(r)}: ${fmt(r.tpot_p95_ms,1)} ms, $${fmt(r.cost_per_million_tokens_usd,2)}/Mtok</title></circle>`;
+      }).join('');
+      svg.innerHTML = axes + points;
     }
     function render() {
       const data = filtered();
       document.getElementById('status').textContent = `${data.length} of ${rows.length} rows shown`;
       renderCards(data);
+      renderLegend(data);
       renderTable(data);
       drawScatter(data);
-      drawBars('throughput', data, 'token_throughput', '#2563eb');
-      drawBars('energy', data, 'energy_per_token_mj', '#dc2626');
-      drawBars('tpot', data, 'tpot_p95_ms', '#b45309');
+      drawBars('throughput', data, 'token_throughput', 'Throughput (tokens/s)', false);
+      drawBars('energy', data, 'energy_per_token_mj', 'Energy (mJ/token)', true);
+      drawBars('tpot', data, 'tpot_p95_ms', 'TPOT p95 (ms)', true);
     }
     loadData().catch(err => {
       document.getElementById('status').innerHTML = `<span class="error">${err.message}</span>`;
