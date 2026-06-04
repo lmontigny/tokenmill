@@ -176,6 +176,10 @@
       color: var(--muted);
       margin-top: 10px;
     }
+    .note {
+      color: var(--muted);
+      margin-top: 10px;
+    }
     .error {
       color: var(--red);
     }
@@ -229,10 +233,11 @@
     </section>
     <section class="panel">
       <h2>Charts</h2>
+      <div class="note">Throughput is achieved output throughput for the configured arrival stream. At low load, fast hardware can tie because it completes the same requests; use TPOT, TTFT, cost, and energy to compare latency/cost, or add higher arrival-rate datasets for saturation capacity.</div>
       <div class="legend" id="legend"></div>
       <div class="charts">
         <div class="chart"><div class="chart-head"><div class="label">Cost vs TPOT p95</div></div><svg id="scatter"></svg></div>
-        <div class="chart"><div class="chart-head"><div class="label">Throughput by configuration</div></div><svg id="throughput"></svg></div>
+        <div class="chart"><div class="chart-head"><div class="label">Achieved output throughput by configuration</div></div><svg id="throughput"></svg></div>
         <div class="chart"><div class="chart-head"><div class="label">Energy per token by configuration</div></div><svg id="energy"></svg></div>
         <div class="chart"><div class="chart-head"><div class="label">TPOT p95 by configuration</div></div><svg id="tpot"></svg></div>
       </div>
@@ -392,7 +397,7 @@
       const cards = [
         card('Cheapest', bestBy(data, 'cost_per_million_tokens_usd'), r => `$${fmt(r.cost_per_million_tokens_usd, 2)}/Mtok`),
         card('Lowest TPOT p95', bestBy(data, 'tpot_p95_ms'), r => `${fmt(r.tpot_p95_ms, 1)} ms`),
-        card('Highest throughput', bestBy(data, 'token_throughput', false), r => `${fmt(r.token_throughput, 0)} tok/s`),
+        card('Highest achieved throughput', bestBy(data, 'token_throughput', false), r => `${fmt(r.token_throughput, 0)} tok/s`),
         card('Lowest energy/token', bestBy(data, 'energy_per_token_mj'), r => `${fmt(r.energy_per_token_mj, 1)} mJ`),
       ];
       document.getElementById('cards').innerHTML = cards.join('');
@@ -512,7 +517,7 @@
       renderLegend(data);
       renderTable(data);
       drawScatter(data);
-      drawBars('throughput', data, 'token_throughput', 'Throughput (tokens/s)', false);
+      drawBars('throughput', data, 'token_throughput', 'Achieved output throughput (tokens/s)', false);
       drawBars('energy', data, 'energy_per_token_mj', 'Energy (mJ/token)', true);
       drawBars('tpot', data, 'tpot_p95_ms', 'TPOT p95 (ms)', true);
     }
