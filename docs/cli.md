@@ -5,6 +5,7 @@
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--gpu` | `h100` | Accelerator preset: `rubin` \| `b200` \| `h200` \| `h100` \| `a100` \| `a10g` \| `mi355x` \| `mi325x` \| `mi300x` \| `tpu-v8i` \| `tpu-v8t` \| `tpu-v7-ironwood` \| `groq-lpu-v1` \| `cerebras-cs3` |
+| `--system` | `none` | System preset: `none` \| `dgx-h100` \| `dgx-h200` \| `dgx-b200`; sets GPU, 8 GPUs/node, and default NDR scale-out |
 | `--model` | `llama-70b` | Model preset: dense, MoE, FP8, W4A16, W4A8KV4, and sparse NVFP4 variants |
 | `--scheduler` | `continuous-batch` | `continuous-batch` \| `chunked-prefill` |
 | `--chunk-size` | `512` | Prefill chunk tokens (chunked-prefill only) |
@@ -78,6 +79,14 @@ serving at scale. Llama 4 Behemoth uses standard GQA (n_kv_heads=8).
 | `tpu-v7-ironwood` | Google TPU v7 (Apr 2025) | 2304 | 4614 | — | 192 GB | 7.37 TB/s | 1.2 TB/s (ICI, 3D-torus) — ~256 MB SRAM | 500 W † |
 | `groq-lpu-v1` | Groq LPU v1 (GroqChip 1) | 188 | 375 | — | **230 MB** § | 80 TB/s § | ~400 GB/s (C2C) — SRAM-only | 215 W |
 | `cerebras-cs3` | Cerebras CS-3 / WSE-3 | 125000 | — | — | **44 GB** ¶ | 21 PB/s ¶ | 150 GB/s (system I/O) | 23000 W † |
+
+## System presets
+
+| Preset | Resolves to | Node size | Default scale-out fabric | Notes |
+|---|---|---:|---|---|
+| `dgx-h100` | `--gpu h100` | 8 GPUs | `ndr-400` | DGX H100: 8 H100 GPUs, 640 GB total HBM, NVLink 4 / NVSwitch inside the system |
+| `dgx-h200` | `--gpu h200` | 8 GPUs | `ndr-400` | DGX H200: 8 H200 GPUs, 1,128 GB total HBM3e |
+| `dgx-b200` | `--gpu b200` | 8 GPUs | `ndr-400` | DGX B200: 8 B200 GPUs, 1,440 GB total HBM3e, NVLink 5 / NVSwitch inside the system |
 
 † Google doesn't publish per-chip TPU TDP; values are estimates from the "2× perf/W vs Ironwood" claim.
 

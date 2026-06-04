@@ -22,6 +22,10 @@ struct Args {
     #[arg(long, default_value = "h100")]
     gpu: String,
 
+    /// System preset: none | dgx-h100 | dgx-h200 | dgx-b200. Sets GPU and node defaults.
+    #[arg(long, default_value = "none")]
+    system: String,
+
     /// Model preset: llama-70b | llama-8b | (-fp8 variants) | mixtral-8x7b | llama4-maverick | deepseek-v3 | kimi-k2 | llama4-behemoth
     #[arg(long, default_value = "llama-70b")]
     model: String,
@@ -407,6 +411,9 @@ fn print_model_card(args: &Args) {
 fn build_cluster_desc(args: &Args, gpu: &GpuSpec) -> String {
     let n_gpus = args.tp * args.pp;
     let mut parts = vec![format!("{}× {}", n_gpus, gpu.name)];
+    if args.system != "none" {
+        parts.push(args.system.to_uppercase());
+    }
     if args.tp > 1 {
         parts.push(format!("TP={}", args.tp));
     }
@@ -483,6 +490,34 @@ fn scale_out_config(args: &Args) -> ScaleOutConfig {
         } else {
             preset.latency_us
         },
+    }
+}
+
+fn apply_system_preset(args: &mut Args) {
+    match args.system.as_str() {
+        "none" => {}
+        "dgx-h100" => {
+            args.gpu = "h100".into();
+            args.gpus_per_node = 8;
+            if args.scale_out_fabric == "none" && args.scale_out_bw_gbps == 0.0 {
+                args.scale_out_fabric = "ndr-400".into();
+            }
+        }
+        "dgx-h200" => {
+            args.gpu = "h200".into();
+            args.gpus_per_node = 8;
+            if args.scale_out_fabric == "none" && args.scale_out_bw_gbps == 0.0 {
+                args.scale_out_fabric = "ndr-400".into();
+            }
+        }
+        "dgx-b200" => {
+            args.gpu = "b200".into();
+            args.gpus_per_node = 8;
+            if args.scale_out_fabric == "none" && args.scale_out_bw_gbps == 0.0 {
+                args.scale_out_fabric = "ndr-400".into();
+            }
+        }
+        other => panic!("Unknown system preset '{}'", other),
     }
 }
 
@@ -815,7 +850,8 @@ fn validate_kernels(path: &str) {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    apply_system_preset(&mut args);
 
     if let Some(ref path) = args.validate_kernels {
         validate_kernels(path);

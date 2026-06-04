@@ -48,6 +48,29 @@ tokenmill --gpu b200 --model llama-70b-fp8 \
   --scale-out-fabric quantum-x800
 ```
 
+For DGX systems, use the system preset. One DGX is an 8-GPU scale-up node:
+
+```bash
+tokenmill --system dgx-h200 --model llama-70b-fp8 --tp 8
+```
+
+Multiple DGX systems cross the scale-out fabric when the parallel degree exceeds
+8. The DGX presets default to 400 Gb/s NDR-class InfiniBand (`ndr-400`), matching
+the ConnectX-7 generation used in DGX H100/H200/B200 scale-out designs:
+
+```bash
+tokenmill --system dgx-b200 --model llama-70b-fp8 \
+  --tp 16
+```
+
+Override the fabric if your cluster uses Spectrum-X Ethernet or 800 Gb/s
+Quantum-X800:
+
+```bash
+tokenmill --system dgx-b200 --model llama-70b-fp8 \
+  --tp 16 --scale-out-fabric spectrum-x800
+```
+
 The simulator then treats parallel groups larger than `--gpus-per-node` as
 cross-node:
 
@@ -81,6 +104,14 @@ PCIe, routing, and congestion, not just the switch headline.
 
 Source validation:
 
+- [NVIDIA DGX H100](https://www.nvidia.com/en-gb/data-center/dgx-h100/)
+  documentation describes 8 H100 GPUs, 640 GB total GPU memory, and 900 GB/s
+  bidirectional NVLink connectivity per GPU inside the system.
+- [NVIDIA DGX BasePOD reference architecture](https://docs.nvidia.com/dgx-basepod/reference-architecture-infrastructure-foundation-enterprise-ai/latest/_downloads/487a2093a4564bef969f38abba12a1f5/ra-11127-001-dbphb100-referencearch.pdf)
+  covers DGX B200, H200, and H100 systems and lists 1,128 GB total GPU memory
+  for DGX H200.
+- [NVIDIA DGX B200 documentation](https://docs.nvidia.com/dgx/dgxb200-user-guide/introduction-to-dgxb200.html)
+  lists 8 B200 GPUs and 1,440 GB total GPU memory.
 - [NVIDIA Quantum-X800 InfiniBand](https://www.nvidia.com/en-us/networking/products/infiniband/quantum-x800/)
   documentation lists 144 ports of 800 Gb/s per switch and ConnectX-8 /
   ConnectX-9 SuperNICs for the platform.

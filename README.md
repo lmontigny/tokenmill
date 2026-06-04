@@ -10,6 +10,7 @@ before you provision the GPUs.
 - **Speedups** — speculative decoding, multi-token prediction, paged KV cache, MLA KV compression
 - **Models** — dense (Llama 8B / 70B + FP8) and MoE (Mixtral, Llama 4 Maverick / Behemoth, DeepSeek V3, Kimi K2 1 T)
 - **Hardware** — NVIDIA rubin (2026) / b200 / h200 / h100 / a100 / a10g, AMD mi300x / mi325x / mi355x, Google TPU v7-ironwood / 8t / 8i, Groq lpu-v1, Cerebras CS-3 / WSE-3
+- **Systems** — DGX H100 / H200 / B200 presets with 8-GPU scale-up nodes and NDR-class scale-out defaults
 - **Latency prediction** — TTFT / TPOT histograms (p50 / p95 / p99), throughput, KV utilization, preemption counts
 - **Energy prediction** — per-chip TDP model, total kJ, mean kW, energy per output token
 - **Cost prediction** — GPU-hour pricing, total $, $ per million tokens, $ per request
